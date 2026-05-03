@@ -184,7 +184,7 @@
 
   /* SIDEBAR */
   .sidebar {
-    position: fixed;
+  position: fixed;
     left: 0; top: 0; bottom: 0;
     width: 72px;
     background: var(--surface);
@@ -194,6 +194,8 @@
     align-items: center;
     padding: 24px 0;
     z-index: 100;
+    overflow-y: auto;   /* <--- Added to fix cutoff tabs */
+    overflow-x: hidden; /* <--- Keeps the scrollbar clean */
   }
 
   .sidebar-logo {
