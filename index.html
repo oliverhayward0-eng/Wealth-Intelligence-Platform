@@ -3743,13 +3743,54 @@
 
       <div class="panel" style="margin-bottom:24px">
         <div class="panel-header">
+          <div>
+            <div class="panel-title">Pooled Backtest · Out-of-Sample</div>
+            <div style="font-size:10px;color:var(--ghost);margin-top:3px">Signals pooled across many tickers/indices. First 70% of dates = in-sample, last 30% = out-of-sample. A signal only earns trust if its edge survives the second period.</div>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+            <button class="refresh-btn" onclick="tdPoolAdd('loaded')">+ ADD LOADED INDEX</button>
+            <div class="form-group"><label class="form-label">Tickers (FMP source)</label><input class="form-input" id="td-pool-sym" type="text" placeholder="NVDA, MSFT, AVGO" style="width:200px;text-transform:uppercase"></div>
+            <button class="refresh-btn" onclick="tdPoolAdd('list')">+ ADD TICKERS</button>
+            <button class="refresh-btn" onclick="tdPoolAdd('all')">+ ADD WATCHLIST + HOLDINGS (FMP)</button>
+            <button class="refresh-btn" onclick="tdPoolClear()">CLEAR POOL</button>
+          </div>
+          <div style="font-size:10px;color:var(--ghost);margin-bottom:12px;line-height:1.7">Uses the price source chosen in Precision Entry. <strong>Google Sheet</strong> mode adds the single ticker in PE_Data!B1 (change B1, wait, press again to keep pooling). <strong>FMP</strong> mode adds the tickers typed here or your whole watchlist. The pool is saved in this browser.</div>
+          <div id="td-pool-status"></div>
+          <div id="td-pool-body"><div style="color:var(--ghost);font-size:12px;text-align:center;padding:24px">Pool is empty. Add the loaded index or some tickers.</div></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:24px;border-color:var(--border-bright)">
+        <div class="panel-header"><div>
+          <div class="panel-title">Turning Point Engine</div>
+          <div style="font-size:10px;color:var(--ghost);margin-top:3px">Separate from the TD signals above. Measures how long and how far the market kept going after each 9/13 before the real turn, finds patterns, and tests which confirmation to wait for.</div>
+        </div></div>
+        <div class="panel-body">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+            <button class="refresh-btn" onclick="tpAdd('loaded')">+ ANALYSE LOADED INDEX</button>
+            <div class="form-group"><label class="form-label">Tickers (FMP source)</label><input class="form-input" id="tp-sym" type="text" placeholder="NVDA, MSFT, AVGO" style="width:190px;text-transform:uppercase"></div>
+            <button class="refresh-btn" onclick="tpAdd('list')">+ ADD TICKERS</button>
+            <button class="refresh-btn" onclick="tpAdd('all')">+ ADD WATCHLIST + HOLDINGS (FMP)</button>
+            <button class="refresh-btn" onclick="tpRender()">↻ REFRESH READ</button>
+            <button class="refresh-btn" onclick="tpClear()">CLEAR</button>
+          </div>
+          <div id="tp-status"></div>
+          <div id="tp-live"></div>
+          <div id="tp-body"><div style="color:var(--ghost);font-size:12px;text-align:center;padding:24px">Load an index above, then press + ANALYSE LOADED INDEX. More tickers make the patterns more reliable.</div></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:24px">
+        <div class="panel-header">
           <div class="panel-title">Every Signal — What Happened Next</div>
           <div style="font-size:10px;color:var(--ghost)">Latest 40 · forward moves are close-to-close from the signal bar · ★ = perfected setup</div>
         </div>
         <div style="overflow-x:auto">
           <table class="data-table" style="min-width:900px">
             <thead>
-              <tr><th>Date</th><th>Signal</th><th>Close</th><th>Quality</th><th>+5 bars</th><th>+10 bars</th><th>+20 bars</th><th title="Worst low in the next 20 bars">Max drop (20)</th><th title="Best high in the next 20 bars">Max rally (20)</th><th>+10 verdict</th></tr>
+              <tr><th>Date</th><th>Signal</th><th>Close</th><th>Quality</th><th title="DeMark TD risk level: if price closes beyond it, the signal is proven wrong">Risk level (held 20 bars?)</th><th>+5 bars</th><th>+10 bars</th><th>+20 bars</th><th title="Worst low in the next 20 bars">Max drop (20)</th><th title="Best high in the next 20 bars">Max rally (20)</th><th>+10 verdict</th></tr>
             </thead>
             <tbody id="td-events-body">
               <tr><td colspan="10" class="td-dim" style="text-align:center;padding:24px">Load price data to list signals</td></tr>
@@ -8191,6 +8232,7 @@ function showPage(name, btn) {
   // Conviction Sentinel activation
   if (name === 'conviction') csActivate();
   if (name === 'precision') { pePopulate(); try{ peRibbonRender(); }catch(e){ console.error('[AURUM Ribbon]',e); } }
+  if (name === 'td-sequential') { try { tdPoolRender(); } catch(e) {} try { tpRender(); } catch(e) {} }
   if (name === 'opex') opexActivate();
   if (name === 'market-entry') { meSemisLoad(); meVxnLoad(); meMacroLoad(); meQqqLoad(); meLogRender(); meRemind(); meBookLoad(); meTltLoad(); mxLoad(); }
 }
@@ -10765,11 +10807,12 @@ function tdRenderHistory() {
         '<td><strong style="color:' + col + '">' + e.type + '</strong></td>' +
         '<td class="td-gold">' + e.close.toLocaleString('en-US', { minimumFractionDigits: 2 }) + '</td>' +
         '<td>' + quality + '</td>' +
+        '<td>' + tdRiskCell(e) + '</td>' +
         '<td>' + cell(5) + '</td><td>' + cell(10) + '</td><td>' + cell(20) + '</td>' +
         '<td style="color:var(--red)">' + tdPct(e.maxDrop) + '</td>' +
         '<td style="color:var(--green)">' + tdPct(e.maxRally) + '</td>' +
         '<td>' + verdict + '</td></tr>';
-    }).join('') : '<tr><td colspan="10" class="td-dim" style="text-align:center;padding:24px">No completed setups or countdowns in this data.</td></tr>';
+    }).join('') : '<tr><td colspan="11" class="td-dim" style="text-align:center;padding:24px">No completed setups or countdowns in this data.</td></tr>';
   }
 }
 
@@ -10902,6 +10945,437 @@ function tdRenderEvidence() {
   if (note) note.innerHTML = '<strong>How to read:</strong> a SELL signal only helps you trim if drops after it are bigger or more frequent than after a random bar that is also near a high. A BUY signal only helps if rebounds are better than after any ordinary pullback. The <strong>luck p-value</strong> is the chance random baseline bars look this good; below 0.05 is meaningful, and with 4 signal types tested, one low value can still be luck. Regime rows with fewer than ~15 signals are anecdotes.';
 }
 
+// ═══════════════════════════════════════════════
+// TD POOLED OUT-OF-SAMPLE BACKTEST
+// ═══════════════════════════════════════════════
+const TD_POOL_KEY = 'aurum_td_pool';
+const TD_TYPES = ['BUY 9','SELL 9','BUY 13','SELL 13'];
+function tdPoolLoad(){ try { return JSON.parse(localStorage.getItem(TD_POOL_KEY) || '{}'); } catch(e) { return {}; } }
+function tdPoolSave(st){ try { localStorage.setItem(TD_POOL_KEY, JSON.stringify(st)); return true; } catch(e) { return false; } }
+const tdR4 = v => Math.round(v * 1e4) / 1e4;
+function tdIso(d){ d = String(d); if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0,10); const t = Date.parse(d); return isNaN(t) ? d.slice(0,10) : new Date(t).toISOString().slice(0,10); }
+
+// Compress one ticker's history into de-clustered signal events + a sampled baseline of ordinary bars.
+function tdPoolBuild(bars){
+  const n = bars.length, C = bars.map(b => b.close), H = bars.map(b => b.high);
+  const res = tdComputeTD(bars);
+  const sma = new Array(n).fill(0); let sm = 0;
+  for (let i = 0; i < n; i++) { sm += C[i]; if (i >= 200) sm -= C[i-200]; if (i >= 199) sma[i] = sm / 200; }
+  const rg = i => { if (i < 220 || !sma[i] || !sma[i-20]) return 0; if (C[i] > sma[i] && sma[i] > sma[i-20]) return 1; if (C[i] < sma[i]) return 2; return 0; };
+  const rmax = (k, i) => { let m = -Infinity; for (let j = Math.max(0, i-k+1); j <= i; j++) m = Math.max(m, H[j]); return m; };
+  const last = {}, ev = [];
+  tdExtractEvents(res).forEach(e => {
+    const p = last[e.type]; last[e.type] = e.i;
+    if (p !== undefined && e.i - p <= 10) return;           // same signal within 10 bars counts once
+    ev.push([tdIso(e.date), TD_TYPES.indexOf(e.type), e.i+10 < n ? tdR4(C[e.i+10]/C[e.i]-1) : null, e.i+20 < n ? tdR4(C[e.i+20]/C[e.i]-1) : null, rg(e.i)]);
+  });
+  const base = [];
+  for (let i = 220; i < n-20; i += 3) {
+    const nh = C[i] >= 0.98 * rmax(60, i) ? 1 : 0, pb = C[i] <= 0.97 * rmax(20, i) ? 1 : 0;
+    base.push([tdIso(bars[i].date), tdR4(C[i+10]/C[i]-1), tdR4(C[i+20]/C[i]-1), nh + 2*pb + 4*rg(i)]);
+  }
+  return { bars:n, from:tdIso(bars[0].date), to:tdIso(bars[n-1].date), ev, base, added:new Date().toISOString().slice(0,10) };
+}
+
+function tdPoolStats(store){
+  let ev = [], base = [];
+  Object.keys(store).forEach(k => { ev = ev.concat(store[k].ev); base = base.concat(store[k].base); });
+  if (!base.length) return null;
+  const ds = base.map(b => b[0]).sort(), cutoff = ds[Math.floor(ds.length * 0.7)];
+  const per = (a, p) => p === 'ALL' ? a : a.filter(x => p === 'IS' ? x[0] < cutoff : x[0] >= cutoff);
+  const mean = a => a.length ? a.reduce((s,v) => s+v, 0) / a.length : null;
+  const cell = (t, p, h, rgc) => {
+    const buy = TD_TYPES[t].startsWith('BUY'), ei = h === 10 ? 2 : 3, bi = h === 10 ? 1 : 2;
+    const es = per(ev, p).filter(e => e[1] === t && e[ei] !== null && (rgc == null || e[4] === rgc)).map(e => e[ei]);
+    const bs = per(base, p).filter(b => (b[3] & (buy ? 2 : 1)) > 0 && (rgc == null || (b[3] >> 2) === rgc)).map(b => b[bi]);
+    const hit = f => buy ? f > 0 : f < 0, n = es.length, hits = es.filter(hit).length;
+    const p0 = bs.length ? bs.filter(hit).length / bs.length : null;
+    const z = (n > 0 && p0 > 0 && p0 < 1) ? (hits - n*p0) / Math.sqrt(n*p0*(1-p0)) : null;
+    return { n, hr: n ? hits/n : null, p0, avg: mean(es), bavg: mean(bs), z };
+  };
+  const groups = TD_TYPES.map((name, t) => ({ t, name, IS:{10:cell(t,'IS',10),20:cell(t,'IS',20)}, OOS:{10:cell(t,'OOS',10),20:cell(t,'OOS',20)},
+    reg:{ up:cell(t,'ALL',10,1), down:cell(t,'ALL',10,2) } }));
+  return { cutoff, groups, nEv: ev.length, nBase: base.length, from: ds[0], to: ds[ds.length-1] };
+}
+
+function tdPoolVerdict(g){
+  const o = g.OOS[10], i = g.IS[10];
+  if (o.n < 30) return { txt:'too few out-of-sample signals (' + o.n + ', need 30+)', col:'var(--ghost)', ok:false };
+  if (o.z !== null && o.z >= 1.64 && (i.z === null || i.z > 0)) return { txt:'edge holds out-of-sample', col:'var(--green)', ok:true };
+  if (o.z !== null && o.z <= -1.64) return { txt:'worse than baseline out-of-sample', col:'var(--red)', ok:false };
+  if (i.z !== null && i.z >= 1.64) return { txt:'looked good in-sample, did NOT survive out-of-sample', col:'var(--red)', ok:false };
+  return { txt:'no edge vs baseline', col:'var(--gold)', ok:false };
+}
+
+function tdPoolRender(){
+  const body = document.getElementById('td-pool-body'); if (!body) return;
+  const store = tdPoolLoad(), keys = Object.keys(store);
+  if (!keys.length) { body.innerHTML = '<div style="color:var(--ghost);font-size:12px;text-align:center;padding:24px">Pool is empty. Add the loaded index or some tickers.</div>'; return; }
+  const S = tdPoolStats(store); if (!S) return;
+  const hr = c => c.hr === null ? '—' : (c.hr*100).toFixed(0) + '%';
+  const b0 = c => c.p0 === null ? '' : '<br><span style="font-size:9px;color:var(--ghost)">base ' + (c.p0*100).toFixed(0) + '%</span>';
+  const av = c => c.avg === null ? '—' : tdPct(c.avg) + '<br><span style="font-size:9px;color:var(--ghost)">base ' + tdPct(c.bavg) + '</span>';
+  const zc = c => c.z === null ? '—' : '<span style="color:' + (c.z >= 1.64 ? 'var(--green)' : c.z <= -1.64 ? 'var(--red)' : 'var(--ghost)') + '">' + c.z.toFixed(1) + '</span>';
+  const verdicts = S.groups.map(tdPoolVerdict), nOk = verdicts.filter(v => v.ok).length;
+  let h = '<div class="alert ' + (nOk ? 'success' : 'warning') + '" style="margin-bottom:14px"><strong>' + (nOk ? nOk + ' of 4 signal types hold an edge out-of-sample.' : 'No signal type shows a confirmed out-of-sample edge yet.') + '</strong> Pool: ' + keys.length + ' source(s), ' + S.nEv + ' de-clustered signals, dates ' + S.from + ' → ' + S.to + '. Split date: <strong>' + S.cutoff + '</strong>.' + (nOk ? '' : ' Until that changes, treat TD as context, not a trade trigger.') + '</div>';
+  h += '<div style="font-size:10px;color:var(--ghost);margin-bottom:12px;line-height:1.8">In pool: ' + keys.map(k => '<strong style="color:var(--gold)">' + k + '</strong> (' + store[k].bars + ' bars, ' + store[k].ev.length + ' signals)').join(' · ') + '</div>';
+  h += '<div style="overflow-x:auto"><table class="data-table" style="min-width:900px"><thead><tr><th>Signal</th><th>Period</th><th>Signals</th><th>Hit rate +10</th><th>Avg move +10</th><th>Hit rate +20</th><th>Avg move +20</th><th title="Standard deviations above the baseline hit rate. 1.64 or more is meaningful">z (+10)</th><th>Verdict</th></tr></thead><tbody>';
+  S.groups.forEach((g, idx) => {
+    const col = g.name.startsWith('SELL') ? 'var(--red)' : 'var(--green)', v = verdicts[idx];
+    ['IS','OOS'].forEach((p, k) => {
+      const a = g[p][10], b = g[p][20];
+      h += '<tr' + (k === 0 && idx > 0 ? ' style="border-top:1px solid var(--border)"' : '') + '><td>' + (k === 0 ? '<strong style="color:' + col + '">' + g.name + '</strong><br><span style="font-size:9px;color:var(--ghost)">vs ' + (g.name.startsWith('SELL') ? 'near-high bars' : 'pullback bars') + '</span>' : '') + '</td>' +
+        '<td class="td-dim">' + (p === 'IS' ? 'In-sample' : '<strong style="color:var(--platinum)">Out-of-sample</strong>') + '</td><td class="td-dim">' + a.n + '</td>' +
+        '<td style="color:var(--platinum);font-weight:600">' + hr(a) + b0(a) + '</td><td>' + av(a) + '</td><td>' + hr(b) + b0(b) + '</td><td>' + av(b) + '</td><td>' + zc(a) + '</td>' +
+        '<td style="color:' + v.col + ';font-weight:600">' + (p === 'OOS' ? v.txt : '') + '</td></tr>';
+    });
+  });
+  h += '</tbody></table></div>';
+  h += '<div style="font-size:10px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin:20px 0 8px">By trend regime (all dates, +10 bars)</div><div style="overflow-x:auto"><table class="data-table" style="min-width:640px"><thead><tr><th>Signal</th><th>Regime</th><th>Signals</th><th>Hit rate</th><th>Avg move</th><th>z</th></tr></thead><tbody>';
+  S.groups.forEach(g => [['up','Above rising 200DMA'],['down','Below 200DMA']].forEach(([k, lab], j) => { const c = g.reg[k];
+    h += '<tr><td>' + (j === 0 ? '<strong style="color:' + (g.name.startsWith('SELL') ? 'var(--red)' : 'var(--green)') + '">' + g.name + '</strong>' : '') + '</td><td class="td-dim">' + lab + '</td><td class="td-dim">' + c.n + '</td><td>' + hr(c) + b0(c) + '</td><td>' + av(c) + '</td><td>' + zc(c) + '</td></tr>'; }));
+  h += '</tbody></table></div>';
+  h += '<div style="font-size:10px;color:var(--ghost);line-height:1.8;margin-top:14px"><strong>How to read:</strong> the baseline is how often the same direction happens from an ordinary comparable bar (near-high bars for SELL, pullback bars for BUY) in the same period. A signal is trusted only if it beats that out-of-sample with z ≥ 1.64 and n ≥ 30. <strong>Caveats:</strong> stocks move together, so 20 tickers are worth fewer than 20 independent samples; survivorship bias flatters today\'s watchlist; no costs. Indices alone are too few signals. Pool many tickers across sectors.</div>';
+  body.innerHTML = h;
+}
+
+async function tdPoolAdd(mode){
+  const st = document.getElementById('td-pool-status'), store = tdPoolLoad(), fail = [];
+  let added = 0;
+  const conv = b => b.map(x => ({ date:x.d, open:x.o, high:x.h, low:x.l, close:x.c }));
+  const put = (k, bars) => { if (bars.length < 400) { fail.push(k + ': only ' + bars.length + ' bars (need 400+)'); return; } store[k] = tdPoolBuild(bars); added++; };
+  try {
+    if (mode === 'loaded') {
+      if (tdBars.length < 400) throw new Error('Load an index above first (S&P 500 or Nasdaq 100). It needs 400+ bars.');
+      put('IDX:' + (tdLastLabel || 'loaded'), tdBars);
+    } else if (peSrc() === 'sheet') {
+      st.innerHTML = '<div class="alert">Reading PE_Data…</div>';
+      const sh = await peSheetLoad();
+      put(sh.ticker.split(':').pop().toUpperCase(), conv(sh.bars));
+      if (mode === 'all') st.innerHTML = '<div class="alert">Google Sheet mode holds one ticker at a time, so only the ticker in PE_Data!B1 was added.</div>';
+    } else {
+      let list = (document.getElementById('td-pool-sym').value || '').toUpperCase().split(/[\s,]+/).filter(Boolean);
+      if (mode === 'all') list = [...new Set([...(typeof wlStocks !== 'undefined' ? wlStocks : []).map(s => s._ticker), ...(sheetData.holdings || []).map(h => h.ticker)].filter(t => t && t !== '—'))];
+      if (!list.length) throw new Error('Type tickers, or use Add watchlist + holdings.');
+      for (let k = 0; k < list.length; k++) {
+        st.innerHTML = '<div class="alert">Processing ' + list[k] + ' (' + (k+1) + '/' + list.length + ')…</div>';
+        try { put(list[k], conv(await peBars(list[k]))); } catch(e) { fail.push(list[k] + ': ' + e.message); }
+        await new Promise(r => setTimeout(r, 350));
+      }
+    }
+  } catch(e) { st.innerHTML = '<div class="alert warning">' + e.message + '</div>'; return; }
+  const saved = tdPoolSave(store);
+  st.innerHTML = '<div class="alert ' + (added && saved ? 'success' : 'warning') + '">Added ' + added + ' source(s).' + (saved ? '' : ' Browser storage is full, so the pool was not saved.') + (fail.length ? '<br>Skipped: ' + fail.join(' | ') : '') + '</div>';
+  tdPoolRender();
+  try { if (tdResults.length) tdRender(tdLastLabel); } catch(e) {}
+}
+function tdPoolClear(){
+  if (!confirm('Clear the pooled TD backtest data?')) return;
+  try { localStorage.removeItem(TD_POOL_KEY); } catch(e) {}
+  document.getElementById('td-pool-status').innerHTML = '';
+  tdPoolRender();
+  try { if (tdResults.length) tdRender(tdLastLabel); } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════
+// TD RISK LEVEL + EVIDENCE-BASED HEADLINE
+// ═══════════════════════════════════════════════
+// DeMark TD risk level: BUY = lowest low of the 9 setup bars minus that bar's true range; SELL = highest high plus its true range.
+// A close beyond the level means the signal is proven wrong. 13s use the setup 9 that started their countdown.
+function tdRiskFor(i, type){
+  const dir = type.startsWith('BUY') ? 'buy' : 'sell', R = tdResults, B = tdBars;
+  let s = i;
+  if (type.endsWith('13')) { s = -1; for (let k = i; k >= 0; k--) { if (dir === 'buy' ? R[k].buySetupComplete : R[k].sellSetupComplete) { s = k; break; } } if (s < 0) return null; }
+  if (s < 8) return null;
+  let m = s - 8;
+  for (let k = s - 8; k <= s; k++) { if (dir === 'buy' ? B[k].low < B[m].low : B[k].high > B[m].high) m = k; }
+  const pc = m > 0 ? B[m-1].close : B[m].close;
+  const tr = Math.max(B[m].high, pc) - Math.min(B[m].low, pc);
+  const level = dir === 'buy' ? B[m].low - tr : B[m].high + tr;
+  let breach = null;
+  for (let k = s + 1; k < B.length; k++) { if (dir === 'buy' ? B[k].close < level : B[k].close > level) { breach = { k, date: B[k].date }; break; } }
+  const held20 = i + 20 < B.length ? !(breach && breach.k <= i + 20) : null;
+  return { level, dir, breach, held20 };
+}
+function tdRiskCell(e){
+  const r = tdRiskFor(e.i, e.type); if (!r) return '<span style="color:var(--ghost)">—</span>';
+  const tag = r.held20 === null ? (r.breach ? '<span style="color:var(--red)">breached</span>' : '<span style="color:var(--ghost)">open</span>')
+    : r.held20 ? '<span style="color:var(--green)">✓ held</span>' : '<span style="color:var(--red)">✗ breached</span>';
+  return r.level.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '<br><span style="font-size:9px">' + tag + '</span>';
+}
+function tdRegimeNow(){
+  const C = tdBars.map(b => b.close), n = C.length; if (n < 221) return null;
+  let a = 0, b = 0; for (let i = n - 200; i < n; i++) a += C[i]; for (let i = n - 220; i < n - 20; i++) b += C[i];
+  const sma = a / 200, sma20 = b / 200;
+  return C[n-1] > sma && sma > sma20 ? 'up' : C[n-1] < sma ? 'down' : 'mixed';
+}
+function tdEvidenceLine(type){
+  const store = tdPoolLoad(), keys = Object.keys(store);
+  if (!keys.length) return { col:'var(--gold)', head: type + ' is unverified', body:'No pooled test yet. Add tickers in the Pooled Backtest panel below. Until then treat this signal as context, not a trigger.' };
+  const S = tdPoolStats(store); if (!S) return null;
+  const g = S.groups[TD_TYPES.indexOf(type)], v = tdPoolVerdict(g), rg = tdRegimeNow();
+  const lab = { up:'an uptrend (above a rising 200-day average)', down:'a downtrend (below the 200-day average)' }[rg];
+  let head, col, proven = false, detail = '';
+  if (lab) {
+    const c = g.reg[rg];
+    if (c.n < 30) { head = type + ' is unproven in ' + lab; col = 'var(--ghost)'; detail = 'Only ' + c.n + ' pooled signals in this regime (need 30+).'; }
+    else if (c.z !== null && c.z >= 1.64) { head = type + ' has a proven edge in ' + lab; col = 'var(--green)'; proven = true; }
+    else if (c.z !== null && c.z <= -1.64) { head = type + ' has worked against you in ' + lab; col = 'var(--red)'; }
+    else { head = type + ' has no proven edge in ' + lab; col = 'var(--gold)'; }
+    if (c.n >= 30) detail = 'Hit rate ' + (c.hr * 100).toFixed(0) + '% vs ' + (c.p0 * 100).toFixed(0) + '% for ordinary bars (' + c.n + ' signals, +10 bars).';
+  } else { head = type + ': mixed trend, so judged on all regimes together'; col = v.col; proven = v.ok; }
+  const body = detail + ' Out-of-sample overall: ' + v.txt + '. ' + (proven && v.ok ? 'Reasonable to act on it, using the risk level as your exit.' : proven ? 'Edge shown in this regime only; the overall test is not confirmed, so size small.' : 'Treat as context. Do not trade on it alone.');
+  return { col, head, body: body.trim() };
+}
+function tdVerdictExtra(type){
+  const ev = tdExtractEvents(tdResults), n = tdResults.length;
+  let e = null;
+  for (let k = ev.length - 1; k >= 0; k--) { if (!type || ev[k].type === type) { e = ev[k]; break; } }
+  if (!e || (!type && n - 1 - e.i > 30)) {
+    const st = tdPoolLoad(); if (!Object.keys(st).length) return '';
+    const S = tdPoolStats(st); if (!S) return '';
+    const ok = S.groups.map(tdPoolVerdict).filter(x => x.ok).length;
+    return '<div style="margin:16px auto 0;max-width:560px;font-size:11px;color:var(--ghost)">Pooled evidence: ' + ok + ' of 4 signal types proven out-of-sample.</div>';
+  }
+  type = type || e.type;
+  const ev1 = tdEvidenceLine(type), rk = (n - 1 - e.i) <= 60 ? tdRiskFor(e.i, type) : null;
+  const last = tdBars[n-1].close, box = 'margin:16px auto 0;max-width:560px;text-align:left;border-top:1px solid var(--border);padding-top:14px;';
+  let h = '<div style="' + box + '">';
+  if (ev1) h += '<div style="font-size:9px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin-bottom:6px">What history says</div><div style="font-size:15px;font-weight:600;color:' + ev1.col + '">' + ev1.head + '</div><div style="font-size:11px;color:var(--text-dim);line-height:1.7;margin-top:4px">' + ev1.body + '</div>';
+  if (rk) {
+    const pct = (rk.level / last - 1) * 100, dirTxt = rk.dir === 'buy' ? 'a close below' : 'a close above';
+    h += '<div style="font-size:9px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin:14px 0 6px">Risk level — where the signal is wrong</div><div style="font-size:15px;font-weight:600;color:var(--platinum)">' + rk.level.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' <span style="font-size:11px;font-weight:400;color:var(--ghost)">(' + (pct >= 0 ? '+' : '−') + Math.abs(pct).toFixed(1) + '% from the current close)</span></div>' +
+      '<div style="font-size:11px;color:var(--text-dim);line-height:1.7;margin-top:4px">' + (rk.breach ? '<span style="color:var(--red);font-weight:700">Signal proven wrong:</span> price closed ' + (rk.dir === 'buy' ? 'below' : 'above') + ' it on ' + rk.breach.date + '. Standard TD practice is to exit or stand aside.' : '<span style="color:var(--green);font-weight:700">Still valid:</span> price has not closed beyond it. ' + dirTxt + ' this level means the ' + (rk.dir === 'buy' ? 'bottom' : 'top') + ' call failed, so it is your exit.') + '</div>';
+  }
+  return h + '</div>';
+}
+
+// ═══════════════════════════════════════════════
+// TURNING POINT ENGINE — timing, patterns, confirmation rules, live read
+// ═══════════════════════════════════════════════
+const TP_KEY = 'aurum_tp_pool', TP_W = 60;
+const TP_NAMES = ['BUY 9','SELL 9','BUY 13','SELL 13'];
+const TP_RULES = ['Enter at signal close','Close beats prior bar high/low','Close beyond 5-bar average','Breaks 5-bar range','Two closes in the new direction'];
+const tpLoad = () => { try { return JSON.parse(localStorage.getItem(TP_KEY) || '{}'); } catch(e) { return {}; } };
+const tpSave = o => { try { localStorage.setItem(TP_KEY, JSON.stringify(o)); return true; } catch(e) { return false; } };
+const tp4 = v => Math.round(v * 1e4) / 1e4;
+const tpMed = a => { if (!a.length) return null; const b = [...a].sort((x,y) => x-y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m-1] + b[m]) / 2; };
+const tpQ = (a, q) => { if (!a.length) return null; const b = [...a].sort((x,y) => x-y); return b[Math.min(b.length-1, Math.floor(q * b.length))]; };
+const tpMean = a => a.length ? a.reduce((x,y) => x+y, 0) / a.length : null;
+const tpP = (v, d) => v == null ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v * 100).toFixed(d === undefined ? 1 : d) + '%';
+
+function tpInd(B){
+  const n = B.length, C = B.map(b => b.close), sma = new Array(n).fill(0), rsi = new Array(n).fill(50), atr = new Array(n).fill(0);
+  let s = 0, g = 0, l = 0, a = 0;
+  for (let i = 0; i < n; i++) {
+    s += C[i]; if (i >= 200) s -= C[i-200]; if (i >= 199) sma[i] = s / 200;
+    if (i > 0) {
+      const d = C[i] - C[i-1], u = Math.max(d,0), w = Math.max(-d,0);
+      if (i <= 14) { g += u/14; l += w/14; } else { g = (g*13+u)/14; l = (l*13+w)/14; }
+      rsi[i] = i < 14 ? 50 : (l === 0 ? 100 : 100 - 100/(1+g/l));
+      const tr = Math.max(B[i].high - B[i].low, Math.abs(B[i].high - C[i-1]), Math.abs(B[i].low - C[i-1]));
+      a = i <= 14 ? (a*(i-1)+tr)/i : (a*13+tr)/14; atr[i] = a;
+    }
+  }
+  return { C, sma, rsi, atr };
+}
+function tpFeat(B, X, R, i, t){
+  const C = X.C, sm = X.sma, rg = (i < 220 || !sm[i] || !sm[i-20]) ? 0 : (C[i] > sm[i] && sm[i] > sm[i-20]) ? 1 : C[i] < sm[i] ? 2 : 0;
+  const pf = t === 0 ? R[i].buySetupPerfect : t === 1 ? R[i].sellSetupPerfect : null;
+  return { rg, rsi: tp4(X.rsi[i]), r10: i >= 10 ? tp4(C[i]/C[i-10]-1) : null, atr: tp4(X.atr[i]/C[i]), d200: sm[i] ? tp4(C[i]/sm[i]-1) : null, pf: pf == null ? null : (pf ? 1 : 0), vx: tpMktAt(TPM.vix, tdIso(B[i].date)), fg: tpMktAt(TPM.fg, tdIso(B[i].date)) };
+}
+// does bar k confirm a turn in direction dir (rule r = 1..4)?
+function tpHit(B, C, k, dir, r){
+  if (k < 6) return false; const up = dir === 'buy';
+  if (r === 1) return up ? C[k] > B[k-1].high : C[k] < B[k-1].low;
+  if (r === 2) { const m = (C[k]+C[k-1]+C[k-2]+C[k-3]+C[k-4]) / 5; return up ? C[k] > m : C[k] < m; }
+  if (r === 3) { const ex = up ? Math.max(C[k-1],C[k-2],C[k-3],C[k-4],C[k-5]) : Math.min(C[k-1],C[k-2],C[k-3],C[k-4],C[k-5]); return up ? C[k] > ex : C[k] < ex; }
+  return up ? (C[k] > C[k-1] && C[k-1] > C[k-2]) : (C[k] < C[k-1] && C[k-1] < C[k-2]);
+}
+function tpBuild(B){
+  const R = tdComputeTD(B), X = tpInd(B), n = B.length, C = X.C, last = {}, recs = [];
+  tdExtractEvents(R).forEach(e => {
+    const p = last[e.type]; last[e.type] = e.i;
+    if (p !== undefined && e.i - p <= 10) return;
+    if (e.i < 220 || e.i + TP_W >= n) return;
+    const t = TP_NAMES.indexOf(e.type), up = e.dir === 'buy', i = e.i;
+    let ext = i; for (let j = i+1; j <= i+TP_W; j++) if (up ? C[j] < C[ext] : C[j] > C[ext]) ext = j;
+    const adv = tp4(up ? C[ext]/C[i]-1 : -(C[ext]/C[i]-1));
+    const rl = [0,1,2,3,4].map(r => {
+      let k = r === 0 ? i : -1;
+      if (r > 0) for (let j = i+1; j <= i+15; j++) if (tpHit(B, C, j, e.dir, r)) { k = j; break; }
+      if (k < 0) return null;
+      let mae = 0; for (let j = k+1; j <= k+20; j++) mae = Math.min(mae, up ? C[j]/C[k]-1 : -(C[j]/C[k]-1));
+      return [k - i, tp4(up ? C[k+20]/C[k]-1 : -(C[k+20]/C[k]-1)), tp4(mae)];
+    });
+    recs.push(Object.assign({ d: tdIso(e.date), t, de: ext - i, adv, rl }, tpFeat(B, X, R, i, t)));
+  });
+  let bs = 0, bh = 0, bn = 0; for (let i = 220; i < n-20; i += 3) { const r = C[i+20]/C[i]-1; bs += r; if (r > 0) bh++; bn++; }
+  return { bars: n, from: tdIso(B[0].date), to: tdIso(B[n-1].date), recs, base: { m: bn ? bs/bn : 0, h: bn ? bh/bn : 0.5, n: bn } };
+}
+
+function tpTbl(h, rows){ return '<div style="overflow-x:auto"><table class="data-table" style="min-width:640px"><thead><tr>' + h.map(x => '<th>' + x + '</th>').join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>'; }
+const tpH = t => '<div style="font-size:10px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin:22px 0 8px">' + t + '</div>';
+
+function tpFeatures(g){
+  const terc = (key) => { const v = g.map(x => x[key]).filter(x => x != null).sort((a,b) => a-b); return v.length < 24 ? null : [v[Math.floor(v.length/3)], v[Math.floor(2*v.length/3)]]; };
+  const F = [];
+  F.push({ name:'Trend regime', keyFn: x => x.rg === 1 ? 'Uptrend (above rising 200DMA)' : x.rg === 2 ? 'Below 200DMA' : 'Mixed' });
+  [['r10','Run-in: 10-bar move',v => (v*100).toFixed(1)+'%'],['rsi','RSI at signal',v => v.toFixed(0)],['atr','Volatility (ATR %)',v => (v*100).toFixed(1)+'%'],['d200','Distance from 200DMA',v => (v*100).toFixed(0)+'%'],['vx','VIX at signal',v => v.toFixed(0)],['fg','Fear & Greed at signal',v => v.toFixed(0)]].forEach(([k,nm,f]) => {
+    const c = terc(k); if (!c) return;
+    F.push({ name:nm, keyFn: x => x[k] == null ? null : x[k] <= c[0] ? 'Lowest third (≤ ' + f(c[0]) + ')' : x[k] <= c[1] ? 'Middle third' : 'Highest third (> ' + f(c[1]) + ')' });
+  });
+  F.push({ name:'Setup perfected (9s only)', keyFn: x => x.pf == null ? null : x.pf ? 'Perfected ★' : 'Not perfected' });
+  return F;
+}
+function tpDirBlock(recs, dir, base, cutoff){
+  const g = recs.filter(x => (TP_NAMES[x.t].startsWith('BUY') ? 'buy' : 'sell') === dir), col = dir === 'buy' ? 'var(--green)' : 'var(--red)';
+  if (g.length < 12) return '<div style="color:var(--ghost);font-size:12px;margin:12px 0">' + dir.toUpperCase() + ': only ' + g.length + ' completed signals, so patterns would be noise. Add more tickers.</div>';
+  const bm = dir === 'buy' ? base.m : -base.m, bh = dir === 'buy' ? base.h : 1 - base.h;
+  let h = '<div style="font-size:15px;font-weight:600;color:' + col + ';margin-top:26px">' + (dir === 'buy' ? 'BOTTOM calls (Buy 9 / Buy 13)' : 'TOP calls (Sell 9 / Sell 13)') + ' · ' + g.length + ' signals</div>';
+  // A. timing
+  const rowsA = [0,1,2,3].filter(t => TP_NAMES[t].startsWith(dir.toUpperCase())).map(t => {
+    const r = g.filter(x => x.t === t), n = r.length; if (!n) return '';
+    const d = r.map(x => x.de), a = r.map(x => x.adv);
+    return '<tr><td><strong style="color:' + col + '">' + TP_NAMES[t] + '</strong></td><td class="td-dim">' + n + '</td><td>' + (r.filter(x => x.adv > -0.02).length / n * 100).toFixed(0) + '%</td><td>' + tpMed(d) + ' days<br><span style="font-size:9px;color:var(--ghost)">middle half: ' + tpQ(d,.25) + '–' + tpQ(d,.75) + '</span></td><td style="color:var(--red)">' + tpP(tpMed(a)) + '<br><span style="font-size:9px;color:var(--ghost)">worst quarter: ' + tpP(tpQ(a,.25)) + '</span></td><td>' + (a.filter(v => v <= -0.05).length / n * 100).toFixed(0) + '%</td></tr>';
+  });
+  h += tpH('1 · How long until the real turn? (next ' + TP_W + ' bars)') + tpTbl(['Signal','Signals','Signal was the extreme (within 2%)','Median days to the real extreme','Median further move against you','Went 5%+ further'], rowsA);
+  // B. patterns
+  const feats = tpFeatures(g).map(f => {
+    const bk = {}; g.forEach(x => { const k = f.keyFn(x); if (k) (bk[k] = bk[k] || []).push(x); });
+    const rows = Object.keys(bk).filter(k => bk[k].length >= 8).map(k => ({ k, n: bk[k].length, adv: tpMed(bk[k].map(x => x.adv)), de: tpMed(bk[k].map(x => x.de)), ex: bk[k].filter(x => x.adv > -0.02).length / bk[k].length }));
+    const sp = rows.length > 1 ? Math.max(...rows.map(r => r.adv)) - Math.min(...rows.map(r => r.adv)) : 0;
+    return { name: f.name, rows, sp };
+  }).filter(f => f.rows.length > 1).sort((a,b) => b.sp - a.sp);
+  const rowsB = []; feats.forEach((f, fi) => f.rows.forEach((r, ri) => rowsB.push('<tr' + (ri === 0 && fi > 0 ? ' style="border-top:1px solid var(--border)"' : '') + '><td>' + (ri === 0 ? '<strong style="color:var(--platinum)">' + f.name + '</strong>' + (fi === 0 ? '<br><span style="color:var(--gold);font-size:9px">★ MOST INFORMATIVE</span>' : '') : '') + '</td><td class="td-dim">' + r.k + '</td><td class="td-dim">' + r.n + '</td><td style="color:var(--red)">' + tpP(r.adv) + '</td><td>' + r.de + ' days</td><td>' + (r.ex * 100).toFixed(0) + '%</td></tr>')));
+  h += tpH('2 · Patterns: which conditions make the move run further?') + tpTbl(['Condition','Bucket','Signals','Median further move','Median days to extreme','Signal was the extreme'], rowsB) +
+    '<div style="font-size:10px;color:var(--ghost);margin-top:6px">Conditions are ranked by how much the median further move differs between buckets. A big gap means that condition tells you something. Small buckets (under 8) are hidden.</div>';
+  // C. confirmation rules
+  const rules = TP_RULES.map((nm, r) => {
+    const es = g.filter(x => x.rl[r]), oos = es.filter(x => x.d >= cutoff), re = es.map(x => x.rl[r][1]), ro = oos.map(x => x.rl[r][1]);
+    return { nm, trig: es.length / g.length, wait: tpMed(es.map(x => x.rl[r][0])), avg: tpMean(re), hit: re.length ? re.filter(v => v > 0).length / re.length : null, mae: tpMean(es.map(x => x.rl[r][2])), no: ro.length, oa: tpMean(ro), oh: ro.length ? ro.filter(v => v > 0).length / ro.length : null };
+  });
+  const best = rules.filter(r => r.no >= 10 && r.oa != null).sort((a,b) => b.oa - a.oa)[0];
+  const rowsC = ['<tr style="background:rgba(212,175,55,0.04)"><td class="td-dim">Any random bar (baseline)</td><td>—</td><td>—</td><td>' + tpP(bm) + '</td><td>' + (bh*100).toFixed(0) + '%</td><td>—</td><td>—</td></tr>'].concat(rules.map(r => '<tr><td>' + (best === r ? '<span style="color:var(--gold)">★ </span>' : '') + r.nm + '</td><td class="td-dim">' + (r.trig*100).toFixed(0) + '%' + (r.wait ? ' · wait ' + r.wait + 'd' : '') + '</td><td style="color:var(--red)">' + tpP(r.mae) + '</td><td style="color:' + (r.avg >= 0 ? 'var(--green)' : 'var(--red)') + '">' + tpP(r.avg) + '</td><td>' + (r.hit == null ? '—' : (r.hit*100).toFixed(0) + '%') + '</td><td style="color:' + (r.oa == null ? 'var(--ghost)' : r.oa >= 0 ? 'var(--green)' : 'var(--red)') + '">' + tpP(r.oa) + '</td><td class="td-dim">' + (r.oh == null ? '—' : (r.oh*100).toFixed(0) + '% (n=' + r.no + ')') + '</td></tr>'));
+  h += tpH('3 · Is it better to wait for a confirmation than act on the signal?') + tpTbl(['Entry rule','Triggered within 15 bars','Avg worst dip after entry','Avg 20-bar result','Win rate','Out-of-sample avg','Out-of-sample win rate'], rowsC) +
+    '<div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7">' + (best ? '<strong style="color:var(--gold)">Best out-of-sample rule:</strong> ' + best.nm + ' (' + tpP(best.oa) + ' avg vs ' + tpP(rules[0].oa) + ' for entering at the signal' + (best.oa > bm ? ', beating a random bar' : ', not better than a random bar') + ').' : 'Not enough out-of-sample signals to rank the rules yet.') + '</div><div style="font-size:10px;color:var(--ghost);margin-top:4px">Results are in your favour: for tops they show the profit of shorting. Out-of-sample = the most recent 40% of signals by date.</div>';
+  return h;
+}
+
+function tpLive(recs){
+  if (!tdResults.length) return '<div style="color:var(--ghost);font-size:12px;margin-bottom:12px">Load an index above to get a live read.</div>';
+  const B = tdBars, n = B.length, ev = tdExtractEvents(tdResults), e = ev[ev.length - 1];
+  if (!e || n - 1 - e.i > 30) return '<div class="alert" style="margin-bottom:14px">No 9 or 13 signal in the last 30 bars of the loaded chart, so there is no live turning-point read right now.</div>';
+  const X = tpInd(B), C = X.C, t = TP_NAMES.indexOf(e.type), up = e.dir === 'buy', D = n - 1 - e.i, f = tpFeat(B, X, tdResults, e.i, t);
+  let an = recs.filter(x => x.t === t && x.rg === f.rg), lab = e.type + ' signals in the same trend regime';
+  if (an.length < 15) { an = recs.filter(x => (TP_NAMES[x.t].startsWith('BUY')) === up); lab = 'all ' + (up ? 'bottom' : 'top') + ' calls'; }
+  let ex = e.i; for (let j = e.i; j < n; j++) if (up ? C[j] < C[ex] : C[j] > C[ex]) ex = j;
+  const soFar = up ? C[ex]/C[e.i]-1 : -(C[ex]/C[e.i]-1), now = up ? C[n-1]/C[e.i]-1 : -(C[n-1]/C[e.i]-1);
+  const fired = [1,2,3,4].map(r => { for (let j = e.i+1; j < n; j++) if (tpHit(B, C, j, e.dir, r)) return TP_RULES[r] + ' (day ' + (j - e.i) + ')'; return null; }).filter(Boolean);
+  let body;
+  if (an.length < 10) body = 'Not enough pooled history yet (' + an.length + ' analogs). Add tickers.';
+  else {
+    const medAdv = tpMed(an.map(x => x.adv)), medDe = tpMed(an.map(x => x.de)), pin = an.filter(x => x.de <= D).length / an.length;
+    body = 'Compared with ' + an.length + ' past ' + lab + ': the real ' + (up ? 'low' : 'high') + ' arrived a median <strong>' + medDe + ' days</strong> after the signal, with a median further move of <strong>' + tpP(medAdv) + '</strong> against it. Today is day <strong>' + D + '</strong> and the worst point so far is ' + tpP(-soFar === 0 ? 0 : -Math.abs(soFar)) + '. In <strong>' + (pin*100).toFixed(0) + '%</strong> of analogs the extreme was already in by day ' + D + '. ' + (soFar <= medAdv ? 'The move has already gone further than the typical case, so the turn is more likely close.' : 'The move has not yet reached the typical extent, so more pain is plausible before the turn.');
+  }
+  return '<div class="panel" style="margin-bottom:14px;border-color:' + (up ? 'var(--green)' : 'var(--red)') + '"><div class="panel-body"><div style="font-size:9px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin-bottom:6px">Live turning-point read</div><div style="font-size:18px;font-weight:600;color:' + (up ? 'var(--green)' : 'var(--red)') + '">' + e.type + ' on ' + e.date + ' · day ' + D + '</div><div style="font-size:12px;color:var(--text-dim);line-height:1.8;margin-top:8px">' + body + '</div><div style="font-size:11px;color:var(--text-dim);margin-top:10px">Price is ' + tpP(now) + ' in the signal\'s direction since the signal. Confirmations so far: ' + (fired.length ? '<span style="color:var(--green)">' + fired.join(' · ') + '</span>' : '<span style="color:var(--gold)">none yet, so the turn is unconfirmed</span>') + '</div></div></div>';
+}
+
+function tpRender(){
+  const body = document.getElementById('tp-body'); if (!body) return;
+  const st = tpLoad(), keys = Object.keys(st); let recs = [], bn = 0, bm = 0, bh = 0;
+  keys.forEach(k => { recs = recs.concat(st[k].recs); const b = st[k].base; bn += b.n; bm += b.m * b.n; bh += b.h * b.n; });
+  document.getElementById('tp-live').innerHTML = tpLive(recs);
+  if (!recs.length) { body.innerHTML = '<div style="color:var(--ghost);font-size:12px;text-align:center;padding:24px">Load an index above, then press + ANALYSE LOADED INDEX.</div>'; return; }
+  const ds = recs.map(x => x.d).sort(), cutoff = ds[Math.floor(ds.length * 0.6)], base = { m: bm / bn, h: bh / bn };
+  body.innerHTML = '<div class="alert ' + (recs.length >= 150 ? 'success' : 'warning') + '">' + recs.length + ' completed signals from ' + keys.length + ' source(s): ' + keys.join(', ') + '. ' + (recs.length >= 150 ? '' : 'Under ~150, treat patterns as hints. Add more tickers.') + '</div>' + tpDirBlock(recs, 'buy', base, cutoff) + tpDirBlock(recs, 'sell', base, cutoff) +
+    '<div style="font-size:10px;color:var(--ghost);line-height:1.8;margin-top:20px"><strong>Caveats:</strong> "real extreme" is measured on closing prices inside ' + TP_W + ' bars, which is only knowable in hindsight. Signals in one selloff are not independent and tickers move together. No costs or slippage. Treat patterns as hypotheses until they hold on out-of-sample data.</div>';
+}
+async function tpAdd(mode){
+  const sEl = document.getElementById('tp-status'), store = tpLoad(), fail = []; let added = 0;
+  const conv = b => b.map(x => ({ date:x.d, open:x.o, high:x.h, low:x.l, close:x.c }));
+  const put = (k, bars) => { if (bars.length < 500) { fail.push(k + ': only ' + bars.length + ' bars (need 500+)'); return; } store[k] = tpBuild(bars); added++; };
+  try {
+    await tpMktLoad();
+    if (mode === 'loaded') { if (tdBars.length < 500) throw new Error('Load an index above first (500+ bars needed).'); put('IDX:' + (tdLastLabel || 'loaded'), tdBars); }
+    else if (peSrc() === 'sheet') { const sh = await peSheetLoad(); put(sh.ticker.split(':').pop().toUpperCase(), conv(sh.bars)); }
+    else {
+      let list = (document.getElementById('tp-sym').value || '').toUpperCase().split(/[\s,]+/).filter(Boolean);
+      if (mode === 'all') list = [...new Set([...(typeof wlStocks !== 'undefined' ? wlStocks : []).map(s => s._ticker), ...(sheetData.holdings || []).map(h => h.ticker)].filter(t => t && t !== '—'))];
+      if (!list.length) throw new Error('Type tickers, or use Add watchlist + holdings.');
+      for (let k = 0; k < list.length; k++) { sEl.innerHTML = '<div class="alert">Processing ' + list[k] + ' (' + (k+1) + '/' + list.length + ')…</div>'; try { put(list[k], conv(await peBars(list[k]))); } catch(e) { fail.push(list[k] + ': ' + e.message); } await new Promise(r => setTimeout(r, 350)); }
+    }
+  } catch(e) { sEl.innerHTML = '<div class="alert warning">' + e.message + '</div>'; return; }
+  const ok = tpSave(store);
+  sEl.innerHTML = '<div class="alert ' + (added && ok ? 'success' : 'warning') + '">Added ' + added + ' source(s).' + (ok ? '' : ' Browser storage full, not saved.') + (fail.length ? '<br>Skipped: ' + fail.join(' | ') : '') + '</div>';
+  tpRender();
+  try { if (tdResults.length) tdRender(tdLastLabel); } catch(e) {}
+}
+function tpClear(){ if (!confirm('Clear the Turning Point Engine data?')) return; try { localStorage.removeItem(TP_KEY); } catch(e) {} document.getElementById('tp-status').innerHTML = ''; tpRender(); }
+
+// ═══════════════════════════════════════════════
+// HISTORICAL ACTION SIGNAL — ENTER / SELL NOW or WAIT
+// ═══════════════════════════════════════════════
+const TPM = { vix: [], fg: [], ok: false };
+async function tpMktLoad(){
+  if (TPM.ok || typeof SHEET_ID === 'undefined' || !SHEET_ID) return;
+  try {
+    const [pe, fgR] = await Promise.all([labTab('PE_Data', 'A1:Z4000'), labTab('fear_greedHistory')]);
+    TPM.vix = peSeries(pe, 10, 11).map(x => ({ k: x.d, v: x.c })); TPM.fg = labSer(fgR, 0, 1); TPM.ok = true;
+  } catch(e) { console.warn('[AURUM TP] market data failed', e); }
+}
+function tpMktAt(a, d){
+  let lo = 0, hi = a.length - 1, r = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (a[m].k <= d) { r = m; lo = m + 1; } else hi = m - 1; }
+  return r >= 0 && (new Date(d) - new Date(a[r].k)) / 864e5 <= 6 ? a[r].v : null;
+}
+function tpRulesFor(g, cutoff){
+  return TP_RULES.map((nm, r) => { const es = g.filter(x => x.rl[r]), ro = es.filter(x => x.d >= cutoff).map(x => x.rl[r][1]); return { r, nm, oa: tpMean(ro), no: ro.length }; });
+}
+function tpAction(){
+  if (!tdResults.length) return null;
+  const B = tdBars, n = B.length, ev = tdExtractEvents(tdResults), e = ev[ev.length - 1];
+  if (!e || n - 1 - e.i > 30) return { v:'NO ACTIVE CALL', col:'var(--ghost)', sub:'No 9 or 13 signal in the last 30 bars, so there is nothing to act on.', pts:[] };
+  const st = tpLoad(); let recs = [], bn = 0, bm = 0;
+  Object.keys(st).forEach(k => { recs = recs.concat(st[k].recs); bn += st[k].base.n; bm += st[k].base.m * st[k].base.n; });
+  const up = e.dir === 'buy', D = n - 1 - e.i, t = TP_NAMES.indexOf(e.type);
+  const L = up ? { go:'ENTER NOW', fail:'STAND ASIDE', gc:'var(--green)' } : { go:'SELL NOW', fail:'HOLD', gc:'var(--red)' };
+  if (recs.length < 60) return { v:'UNVERIFIED', col:'var(--gold)', sub:'Only ' + recs.length + ' historical signals analysed. Press + ANALYSE LOADED INDEX and add tickers in the Turning Point Engine below.', pts:[] };
+  if (!TPM.ok && !TPM.tried) { TPM.tried = true; tpMktLoad().then(() => { try { if (tdResults.length) tdRender(tdLastLabel); } catch(e) {} }); }
+  const X = tpInd(B), C = X.C, f = tpFeat(B, X, tdResults, e.i, t), rk = tdRiskFor(e.i, e.type), isB = x => TP_NAMES[x.t].startsWith('BUY');
+  const g = recs.filter(x => isB(x) === up), ds = recs.map(x => x.d).sort(), cutoff = ds[Math.floor(ds.length * 0.6)];
+  let an = recs.filter(x => x.t === t && x.rg === f.rg); if (an.length < 15) an = g;
+  const rules = tpRulesFor(g, cutoff), best = rules.slice(1).filter(r => r.no >= 10 && r.oa != null).sort((a, b) => b.oa - a.oa)[0];
+  const fired = [1,2,3,4].map(r => { for (let j = e.i + 1; j < n; j++) if (tpHit(B, C, j, e.dir, r)) return j - e.i; return null; });
+  const nF = fired.filter(x => x !== null).length, bestF = best && fired[best.r - 1] !== null;
+  const medAdv = tpMed(an.map(x => x.adv)), medDe = tpMed(an.map(x => x.de)), pin = an.filter(x => x.de <= D).length / an.length;
+  let ex = e.i; for (let j = e.i; j < n; j++) if (up ? C[j] < C[ex] : C[j] > C[ex]) ex = j;
+  const soFar = up ? C[ex]/C[e.i]-1 : -(C[ex]/C[e.i]-1), extent = medAdv < -0.001 ? Math.min(1, soFar / medAdv) : 1;
+  const conf = [0,12,22,30,30][nF] + (bestF ? 5 : 0), time = 25 * (0.5 * pin + 0.5 * extent);
+  const ter = k => { const v = recs.map(x => x[k]).filter(x => x != null).sort((a, b) => a - b); return v.length < 24 ? null : [v[Math.floor(v.length/3)], v[Math.floor(2*v.length/3)]]; };
+  const cv = ter('vx'), cf = ter('fg'); let cp = 0, cm = 0; const notes = [];
+  if (cv && f.vx != null) { cm += 10; const hi = f.vx >= cv[1], lo = f.vx <= cv[0]; cp += (up ? hi : lo) ? 10 : (hi || lo) ? 0 : 5; notes.push('VIX ' + f.vx.toFixed(0) + ' is in the ' + (hi ? 'top' : lo ? 'bottom' : 'middle') + ' third of history' + ((up ? hi : lo) ? ' (supports the call)' : '')); }
+  if (cf && f.fg != null) { cm += 10; const hi = f.fg >= cf[1], lo = f.fg <= cf[0]; cp += (up ? lo : hi) ? 10 : (hi || lo) ? 0 : 5; notes.push('Fear & Greed ' + f.fg.toFixed(0) + ' is in the ' + (hi ? 'top' : lo ? 'bottom' : 'middle') + ' third' + ((up ? lo : hi) ? ' (supports the call)' : '')); }
+  if (TPM.ok) { const lastBar = tdIso(B[n-1].date); [['VIX', TPM.vix], ['Fear & Greed', TPM.fg]].forEach(([nm, a]) => { if (!a.length) notes.push('DATA: ' + nm + ' history is empty, so it is ignored'); else if ((new Date(lastBar) - new Date(a[a.length-1].k)) / 864e5 > 6) notes.push('DATA: ' + nm + ' history ends ' + a[a.length-1].k + ' (chart ends ' + lastBar + '), refresh that tab'); }); }
+  const ctx = cm ? 20 * cp / cm : 10; if (!cm) notes.push('VIX / Fear & Greed not attached to these records. Re-run + ANALYSE LOADED INDEX.');
+  const bl = up ? bm / bn : -bm / bn, edge = best && best.oa > bl, evid = (edge ? 10 : 0) + (recs.length >= 150 ? 5 : 0) + (best && best.no >= 20 ? 5 : 0);
+  const score = Math.round(conf + time + ctx + evid), pts = [];
+  pts.push('Confirmation: ' + (nF ? nF + ' of 4 fired (' + fired.map((d, i) => d !== null ? TP_RULES[i+1] + ' day ' + d : null).filter(Boolean).join(', ') + ')' : 'none yet') + (best ? '. Best rule historically: ' + best.nm + (bestF ? ' ✓ fired' : ' (not fired)') : ''));
+  pts.push('Timing: day ' + D + '; the real ' + (up ? 'low' : 'high') + ' came a median ' + medDe + ' days after the signal, and ' + (pin * 100).toFixed(0) + '% of ' + an.length + ' similar signals had already hit their extreme by now. Move so far ' + tpP(soFar) + ' vs typical ' + tpP(medAdv));
+  notes.forEach(x => pts.push(x));
+  pts.push('Evidence: ' + recs.length + ' signals analysed; ' + (best ? best.nm + ' ' + (edge ? 'beat' : 'did NOT beat') + ' a random bar out-of-sample (' + tpP(best.oa) + ' vs ' + tpP(bl) + ')' : 'no confirmation rule has enough out-of-sample data'));
+  if (rk) pts.push('Risk level ' + rk.level.toFixed(2) + ' — ' + (rk.breach ? 'BREACHED on ' + rk.breach.date : 'intact'));
+  let v, col, sub;
+  if (rk && rk.breach) { v = L.fail; col = 'var(--ghost)'; sub = 'The ' + (up ? 'bottom' : 'top') + ' call has failed: price closed beyond the TD risk level. ' + (up ? 'Do not enter on this signal.' : 'Do not sell on this signal; the uptrend is intact.'); }
+  else if (score >= 65 && nF >= 1 && evid >= 10) { v = L.go; col = L.gc; sub = 'History and the confirmation rules agree: ' + (up ? 'the low is likely in, so it is a reasonable entry. Use the risk level as your exit.' : 'the high is likely in, so trimming or selling now is supported. Use the risk level as your stop.'); }
+  else { v = 'WAIT'; col = 'var(--gold)'; sub = !nF ? 'The turn is not confirmed. Wait for: ' + (best ? best.nm : TP_RULES[1]) + '.' : pin < 0.4 ? 'Confirmation has appeared, but similar signals usually kept going longer. Expect more ' + (up ? 'downside' : 'upside') + ' first.' : 'Evidence is not strong enough yet (score ' + score + '/100, needs 65+ with a confirmation and a proven rule).'; }
+  return { v, col, sub, pts, score };
+}
+function tpActionHtml(){
+  const a = tpAction(); if (!a) return '';
+  return '<div style="margin:16px auto 4px;max-width:560px;border:2px solid ' + a.col + ';border-radius:2px;padding:14px 18px;background:rgba(255,255,255,0.02)"><div style="font-size:9px;letter-spacing:3px;color:var(--ghost);text-transform:uppercase">Historical action signal</div><div style="font-size:30px;font-weight:700;color:' + a.col + ';letter-spacing:2px;margin:4px 0">' + a.v + (a.score != null ? ' <span style="font-size:12px;font-weight:400;color:var(--ghost);letter-spacing:1px">score ' + a.score + '/100</span>' : '') + '</div><div style="font-size:12px;color:var(--text-dim);line-height:1.7">' + a.sub + '</div>' +
+    (a.pts.length ? '<details style="margin-top:10px;text-align:left"><summary style="cursor:pointer;font-size:10px;letter-spacing:2px;color:var(--gold);text-transform:uppercase">Why</summary>' + a.pts.map(x => '<div style="font-size:11px;color:var(--text-dim);line-height:1.7;margin-top:6px">▸ ' + x + '</div>').join('') + '</details>' : '') + '</div>';
+}
+
 // ── Data source selector (S&P 500 tab vs Nasdaq 100 tab) ──
 const TD_SOURCES = {
   sp500: { label: 'S&P 500',    tab: 'SP500History' },
@@ -10977,10 +11451,10 @@ function tdRender(label) {
   let verdict = null;
   for (let i = lookback.length - 1; i >= 0; i--) {
     const r = lookback[i];
-    if (r.sellCountdownComplete) { verdict = { icon:'🚨', color:'var(--red)', text:'SELL COUNTDOWN 13 COMPLETE', sub:'High-probability top signal on ' + r.date + '. Historically a strong reversal zone — consider trimming into strength.' }; break; }
-    if (r.buyCountdownComplete)  { verdict = { icon:'🚨', color:'var(--green)', text:'BUY COUNTDOWN 13 COMPLETE', sub:'High-probability bottom signal on ' + r.date + '. Historically a strong reversal zone — consider scaling into weakness.' }; break; }
-    if (r.sellSetupComplete)     { verdict = { icon:'⚠', color:'#ff8844', text:'SELL SETUP 9 COMPLETE', sub:'Exhaustion signal at the top on ' + r.date + '. Watch for a Countdown 13 to confirm.' }; break; }
-    if (r.buySetupComplete)      { verdict = { icon:'⚡', color:'#8BC34A', text:'BUY SETUP 9 COMPLETE', sub:'Exhaustion signal at the bottom on ' + r.date + '. Watch for a Countdown 13 to confirm.' }; break; }
+    if (r.sellCountdownComplete) { verdict = { icon:'🚨', color:'var(--red)', text:'SELL COUNTDOWN 13 COMPLETE', type:'SELL 13', sub:'High-probability top signal on ' + r.date + '. Historically a strong reversal zone — consider trimming into strength.' }; break; }
+    if (r.buyCountdownComplete)  { verdict = { icon:'🚨', color:'var(--green)', text:'BUY COUNTDOWN 13 COMPLETE', type:'BUY 13', sub:'High-probability bottom signal on ' + r.date + '. Historically a strong reversal zone — consider scaling into weakness.' }; break; }
+    if (r.sellSetupComplete)     { verdict = { icon:'⚠', color:'#ff8844', text:'SELL SETUP 9 COMPLETE', type:'SELL 9', sub:'Exhaustion signal at the top on ' + r.date + '. Watch for a Countdown 13 to confirm.' }; break; }
+    if (r.buySetupComplete)      { verdict = { icon:'⚡', color:'#8BC34A', text:'BUY SETUP 9 COMPLETE', type:'BUY 9', sub:'Exhaustion signal at the bottom on ' + r.date + '. Watch for a Countdown 13 to confirm.' }; break; }
   }
   if (!verdict) {
     if (last.buyCountdownCount > 0) verdict = { icon:'⏳', color:'var(--green)', text:'Buy Countdown in progress: ' + last.buyCountdownCount + '/13', sub:'Bottoming process underway — not yet confirmed.' };
@@ -10992,12 +11466,14 @@ function tdRender(label) {
 
   if (last.buyCountdownDeferred || last.sellCountdownDeferred) verdict.sub += ' Bar 13 is <strong>deferred</strong> — it must also pass the qualifier (price must reach the close of countdown bar 8).';
   verdict.sub += tdLastSignalLine();
+  try { verdict.action = tpActionHtml(); } catch(e) { console.error('[AURUM TD] action signal:', e); }
+  try { verdict.extra = tdVerdictExtra(verdict.type || null); } catch(e) { console.error('[AURUM TD] verdict extra:', e); }
 
   document.getElementById('td-verdict-panel').innerHTML =
     '<div class="panel-body" style="text-align:center;padding:32px 24px">' +
       '<div style="font-size:36px;margin-bottom:10px">' + verdict.icon + '</div>' +
-      '<div style="font-size:20px;font-weight:600;color:' + verdict.color + ';letter-spacing:1px">' + verdict.text + '</div>' +
-      '<div style="font-size:12px;color:var(--text-dim);margin-top:8px;max-width:520px;margin-left:auto;margin-right:auto;line-height:1.7">' + verdict.sub + '</div>' +
+      '<div style="font-size:20px;font-weight:600;color:' + verdict.color + ';letter-spacing:1px">' + verdict.text + '</div>' + (verdict.action || '') +
+      '<div style="font-size:12px;color:var(--text-dim);margin-top:8px;max-width:520px;margin-left:auto;margin-right:auto;line-height:1.7">' + verdict.sub + '</div>' + (verdict.extra || '') +
     '</div>';
 
   const titleEl = document.getElementById('td-chart-title');
