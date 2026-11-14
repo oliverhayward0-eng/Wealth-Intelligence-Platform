@@ -3384,14 +3384,16 @@
       <div id="me-synth" style="margin-bottom:16px"></div>
       <div class="stats-grid stats-grid-3" id="me-grid" style="margin-bottom:16px"></div>
       <details class="panel" id="me-backdrop" style="margin-bottom:16px"><summary id="me-backdrop-sum" style="cursor:pointer;padding:16px 24px;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--gold)">Backdrop — context panels, not scored</summary><div style="border-top:1px solid var(--border);padding:16px 16px 0">
+      <div id="me-val" style="margin-bottom:16px"></div>
       <div id="me-book" style="margin-bottom:16px"></div>
       <div id="me-semis" style="margin-bottom:16px"></div>
       <div id="me-tlt" style="margin-bottom:16px"></div>
       <div id="me-macro" style="margin-bottom:16px"></div>
+      <div id="me-fed" style="margin-bottom:16px"></div>
       </div></details>
       <details class="panel" style="margin-bottom:16px"><summary style="cursor:pointer;padding:16px 24px;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--gold)">Score Lab — what history says about market bottoms</summary>
         <div class="panel-body" style="border-top:1px solid var(--border)">
-          <div style="font-size:12px;color:var(--text-dim);line-height:1.8;margin-bottom:12px">Tests which signals have actually preceded good entries on your 10 years of Nasdaq-100 data (with VIX and the 10-year yield), and reviews every drawdown of 15% or more: how early each signal fired, and how much lower the market went afterwards. Uses PriceHistory, PE_Data (VIX), Yields, fear_greedHistory, AAIIHistory, CboeHistory (+_2), NDFIHistory, QQQShortHistory, TLTHistory, HYGHistory and IEFHistory.</div>
+          <div style="font-size:12px;color:var(--text-dim);line-height:1.8;margin-bottom:12px">Tests which signals have actually preceded good entries on your 10 years of Nasdaq-100 data (with VIX and the 10-year yield), and reviews every drawdown of 15% or more: how early each signal fired, and how much lower the market went afterwards. Uses PriceHistory, PE_Data (VIX), Yields, fear_greedHistory, AAIIHistory, CboeHistory (+_2), NDFIHistory, QQQShortHistory, TLTHistory, HYGHistory, IEFHistory and NDXValuation.</div>
           <button class="refresh-btn" onclick="labRun()" style="padding:11px 18px">▶ RUN STUDY</button>
           <div id="lab-out" style="margin-top:16px"></div>
         </div></details>
@@ -8234,7 +8236,7 @@ function showPage(name, btn) {
   if (name === 'precision') { pePopulate(); try{ peRibbonRender(); }catch(e){ console.error('[AURUM Ribbon]',e); } }
   if (name === 'td-sequential') { try { tdPoolRender(); } catch(e) {} try { tpRender(); } catch(e) {} }
   if (name === 'opex') opexActivate();
-  if (name === 'market-entry') { meSemisLoad(); meVxnLoad(); meMacroLoad(); meQqqLoad(); meLogRender(); meRemind(); meBookLoad(); meTltLoad(); }
+  if (name === 'market-entry') { meSemisLoad(); meVxnLoad(); meMacroLoad(); meQqqLoad(); meLogRender(); meRemind(); meBookLoad(); meTltLoad(); meValLoad(); meFedLoad(); }
 }
 
 function toggleSidebar() {
@@ -9841,6 +9843,122 @@ function renderMarginEngine() {
   mgDrawChart();
   if (typeof renderMEScore === 'function') renderMEScore();
 }
+
+
+// ═══════════════════════════════════════════════
+// NASDAQ-100 FORWARD P/E — valuation backdrop (context, not scored)
+// Source: your NDXValuation tab (A = date, B = forward P/E)
+// ═══════════════════════════════════════════════
+let meValRange = 99999;
+function meValSetRange(m, btn) {
+  meValRange = m;
+  btn.parentNode.querySelectorAll('.pg-horizon-btn').forEach(x => x.classList.remove('pg-horizon-active'));
+  btn.classList.add('pg-horizon-active');
+  meValDraw();
+}
+async function meValLoad() {
+  if (meData.valBusy) return;
+  if (typeof SHEET_ID === 'undefined' || !SHEET_ID) return;
+  meData.valBusy = true;
+  try {
+    const rows = await labTab('NDXValuation', 'A1:C6000');
+    const mp = {};
+    labSer(rows, 0, 1).forEach(x => { if (x.v > 5 && x.v < 80) mp[x.k] = x.v; });
+    const ser = Object.keys(mp).sort().map(k => ({ k, v: mp[k] }));
+    if (!ser.length) meData.val = { missing: true };
+    else if (ser.length < 250) meData.val = { error: 'Only ' + ser.length + ' valid rows in NDXValuation (need 250+ for a meaningful percentile).' };
+    else {
+      const n = ser.length, L = n - 1, vals = ser.map(x => x.v), v = vals[L];
+      const avg = vals.reduce((t, x) => t + x, 0) / n;
+      const sd = Math.sqrt(vals.reduce((t, x) => t + (x - avg) ** 2, 0) / n);
+      const sorted = [...vals].sort((a, b) => a - b);
+      const pct = vals.filter(x => x <= v).length / n * 100;
+      let loI = 0, hiI = 0; vals.forEach((x, i) => { if (x < vals[loI]) loI = i; if (x > vals[hiI]) hiI = i; });
+      const at = days => { const t = new Date(ser[L].k + 'T12:00:00'); t.setDate(t.getDate() - days); const key = opxKey(t); for (let i = L; i >= 0; i--) if (ser[i].k <= key) return i; return -1; };
+      const chg = days => { const j = at(days); return j >= 0 ? (v / vals[j] - 1) * 100 : null; };
+      let dec = null;
+      try {
+        const nd = await meNdxSeries();
+        const pAt = key => { for (let i = nd.length - 1; i >= 0; i--) if (nd[i].k <= key) return nd[i]; return null; };
+        const mk = days => {
+          const j = at(days); if (j < 0) return null;
+          const a = pAt(ser[j].k), b = pAt(ser[L].k); if (!a || !b) return null;
+          if ((new Date(ser[j].k) - new Date(a.k)) / 864e5 > 6 || (new Date(ser[L].k) - new Date(b.k)) / 864e5 > 6) return null;
+          const pe = v / vals[j] - 1, px = b.c / a.c - 1;
+          return { pe: pe * 100, px: px * 100, eps: ((1 + px) / (1 + pe) - 1) * 100 };
+        };
+        dec = { m3: mk(91), y1: mk(365) };
+      } catch (e) { console.warn('[AURUM ME] P/E decomposition failed', e); }
+      let sm = 0; for (let i = 1; i < n; i++) if (Math.abs(vals[i] - vals[i - 1]) <= 0.03) sm++;
+      const state = pct <= 10 ? 'CHEAP' : pct <= 40 ? 'FAIR-LOW' : pct <= 80 ? 'FAIR' : 'RICH';
+      meData.val = { ser, vals, n, v, date: ser[L].k, from: ser[0].k, avg, sd, pct, state, cheapLevel: sorted[Math.floor(0.1 * n)],
+        lo: { v: vals[loI], date: ser[loI].k }, hi: { v: vals[hiI], date: ser[hiI].k },
+        c1m: chg(30), c3m: chg(91), c1y: chg(365), dec, smooth: sm / (n - 1),
+        age: Math.floor((new Date() - new Date(ser[L].k + 'T12:00:00')) / 864e5) };
+    }
+  } catch (e) { meData.val = { error: e.message }; }
+  meData.valBusy = false;
+  meValRender();
+}
+function meValDraw() {
+  const m = meData.val, cv = document.getElementById('meValChart');
+  if (!m || !m.ser || !cv) return;
+  destroyChart('meVal');
+  const s0 = Math.max(0, m.n - meValRange), view = m.ser.slice(s0), lab = view.map(x => x.k), flat = (val, color, name, w) => ({ label: name, data: lab.map(() => val), borderColor: color, borderDash: [5, 4], borderWidth: w || 1, pointRadius: 0, fill: false });
+  const ctx = cv.getContext('2d'), grad = ctx.createLinearGradient(0, 0, 0, 280);
+  grad.addColorStop(0, 'rgba(212,175,55,0.22)'); grad.addColorStop(1, 'rgba(212,175,55,0)');
+  charts['meVal'] = new Chart(ctx, {
+    type: 'line',
+    data: { labels: lab, datasets: [
+      { label: 'Forward P/E', data: view.map(x => x.v), borderColor: '#d4af37', backgroundColor: grad, fill: true, borderWidth: 2, pointRadius: 0, tension: 0 },
+      flat(m.avg, 'rgba(180,180,210,0.75)', 'Average ' + m.avg.toFixed(1) + 'x', 1.2),
+      flat(m.avg + m.sd, 'rgba(180,180,210,0.3)', '+1σ ' + (m.avg + m.sd).toFixed(1) + 'x'),
+      flat(m.avg - m.sd, 'rgba(180,180,210,0.3)', '−1σ ' + (m.avg - m.sd).toFixed(1) + 'x'),
+      flat(m.cheapLevel, 'rgba(0,212,160,0.8)', 'Cheapest 10% line ' + m.cheapLevel.toFixed(1) + 'x'),
+      flat(m.lo.v, 'rgba(255,68,102,0.7)', 'Series low ' + m.lo.v.toFixed(1) + 'x (' + m.lo.date + ')')
+    ] },
+    options: { ...chartDefaults,
+      plugins: { legend: { labels: { color: '#b0b0cc', font: { size: 9 } } }, tooltip: { callbacks: { label: it => it.datasetIndex === 0 ? '  Forward P/E ' + it.parsed.y.toFixed(2) + 'x' : '  ' + it.dataset.label } } },
+      scales: { x: { grid: { display: false }, ticks: { color: '#9090b0', font: { size: 9 }, maxTicksLimit: 8 } }, y: { grid: { color: 'rgba(212,175,55,0.05)' }, ticks: { color: '#9090b0', callback: x => x + 'x' } } } }
+  });
+}
+function meValRender() {
+  setTimeout(meSynth, 0);
+  const el = document.getElementById('me-val'); if (!el) return;
+  const m = meData.val, head = '<div class="panel"><div class="panel-header"><div class="panel-title">Valuation — Nasdaq-100 forward P/E</div><div style="font-size:10px;color:var(--ghost)">Context · not part of the score</div></div><div class="panel-body">';
+  if (!m) { el.innerHTML = ''; return; }
+  if (m.missing || m.error) { el.innerHTML = head + '<div class="alert warning">' + (m.error || 'NDXValuation tab not found or empty.') + '</div><div style="font-size:11px;color:var(--text-dim);line-height:1.8">The tab must be named exactly <strong style="color:var(--gold)">NDXValuation</strong>, with dates in column A and the forward P/E in column B (header in row 1).</div></div></div>'; return; }
+  const col = { CHEAP: 'var(--green)', 'FAIR-LOW': '#8BC34A', FAIR: 'var(--gold)', RICH: 'var(--red)' }[m.state];
+  const sg = (x, d) => x === null || x === undefined ? '—' : (x >= 0 ? '+' : '') + x.toFixed(d === undefined ? 1 : d) + '%';
+  const vsAvg = (m.v / m.avg - 1) * 100, vsLo = (m.v / m.lo.v - 1) * 100, atLow = vsLo < 1;
+  const txt = {
+    CHEAP: 'The multiple is in the bottom tenth of its own history in this sheet (' + m.pct.toFixed(0) + 'th percentile), ' + (atLow ? 'at the lowest level of the whole series.' : sg(vsLo) + ' above the series low of ' + m.lo.v.toFixed(1) + 'x.') + ' You are paid more than usual per euro of earnings, but cheap can get cheaper: a low multiple says the risk/reward is better, not that the bottom is in. Use it to raise conviction when washout signals also fire, not as a timing trigger.',
+    'FAIR-LOW': 'Below its average (' + m.avg.toFixed(1) + 'x) but not at an extreme. A modest valuation cushion.',
+    FAIR: 'Close to its own norm. Valuation neither helps nor hurts the case for adding.',
+    RICH: 'In the top fifth of its range. There is little valuation cushion, so disappointments can hit hard. Favour staged entries over lump sums.'
+  }[m.state];
+  const d3 = m.dec && m.dec.m3;
+  let why = '';
+  if (d3) {
+    why = 'Over about 3 months the multiple moved <strong>' + sg(d3.pe) + '</strong>: price <strong>' + sg(d3.px) + '</strong>, estimated forward earnings <strong>' + sg(d3.eps) + '</strong>. ';
+    if (d3.pe < -3 && d3.eps > 2) why += 'Prices fell while earnings estimates rose, which is the healthier kind of cheapening.';
+    else if (d3.pe < -3 && d3.eps < -2) why += 'Analysts are cutting estimates too, so part of the cheapening is lower earnings, and the stocks are less cheap than the multiple suggests.';
+    else if (d3.pe < -3) why += 'Most of the move is price, with estimates roughly flat.';
+  }
+  const card = (l, v, sub, c) => '<div class="stat-card"><div class="stat-label">' + l + '</div><div class="stat-value" style="font-size:22px;color:' + (c || 'var(--platinum)') + '">' + v + '</div><div class="stat-change neutral">' + sub + '</div>' + meTip(l) + '</div>';
+  const warns = (m.age > 5 ? '<div class="alert warning" style="margin-bottom:12px">NDXValuation ends ' + m.date + ' (' + m.age + ' days old). Check that the tab is still refreshing.</div>' : '') +
+    (m.smooth > 0.6 ? '<div class="alert" style="margin-bottom:12px"><strong>Data note:</strong> ' + (m.smooth * 100).toFixed(0) + '% of day-to-day changes in this tab are 0.03x or smaller, which suggests the series is smoothed or interpolated between a few real readings. The level, percentile and trend are usable, but individual daily moves are not real market moves, and the Score Lab results for P/E will be less precise.</div>' : '');
+  el.innerHTML = head + warns +
+    '<div style="font-size:20px;font-weight:600;color:' + col + ';margin-bottom:6px">' + m.state + '</div><div style="font-size:12px;color:var(--text-dim);line-height:1.7;margin-bottom:12px;max-width:760px">' + txt + '</div>' +
+    (why ? '<div style="font-size:12px;color:var(--text-dim);line-height:1.7;margin-bottom:14px;max-width:760px">' + why + '</div>' : '') +
+    '<div class="stats-grid stats-grid-4" style="margin-bottom:12px">' + card('Forward P/E', m.v.toFixed(1) + 'x', 'as of ' + m.date, col) + card('5-year percentile', m.pct.toFixed(0) + 'th', 'lower = cheaper vs own history', col) + card('vs 5-year average', sg(vsAvg), 'average ' + m.avg.toFixed(1) + 'x (σ ' + m.sd.toFixed(1) + ')', vsAvg <= -15 ? 'var(--green)' : vsAvg >= 15 ? 'var(--red)' : '') + card('vs series low', sg(vsLo), 'low ' + m.lo.v.toFixed(1) + 'x on ' + m.lo.date) + '</div>' +
+    '<div class="stats-grid stats-grid-4" style="margin-bottom:14px">' + card('P/E change, 3 months', sg(d3 ? d3.pe : m.c3m), '1 month ' + sg(m.c1m) + ' · 1 year ' + sg(m.c1y)) + card('Price change, 3 months', d3 ? sg(d3.px) : '—', 'Nasdaq-100 from PriceHistory') + card('Earnings estimates, 3M', d3 ? sg(d3.eps) : '—', 'implied by price ÷ P/E', d3 ? (d3.eps >= 0 ? 'var(--green)' : 'var(--red)') : '') + card('Series high', m.hi.v.toFixed(1) + 'x', m.hi.date) + '</div>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px"><div style="font-size:9px;letter-spacing:2px;color:var(--ghost);text-transform:uppercase">Forward P/E history · ' + m.from + ' → ' + m.date + ' (' + m.n.toLocaleString('en-US') + ' days)</div><div style="display:flex;gap:6px"><button class="pg-horizon-btn" style="padding:4px 10px" onclick="meValSetRange(252,this)">1Y</button><button class="pg-horizon-btn" style="padding:4px 10px" onclick="meValSetRange(756,this)">3Y</button><button class="pg-horizon-btn pg-horizon-active" style="padding:4px 10px" onclick="meValSetRange(99999,this)">All</button></div></div>' +
+    '<div class="chart-container" style="height:280px"><canvas id="meValChart"></canvas></div>' +
+    '<div style="font-size:10px;color:var(--ghost);line-height:1.8;margin-top:12px"><strong>How to read it:</strong> the percentile ranks today against only the ' + (m.n / 252).toFixed(1) + ' years in your tab, so it depends on that window (it starts at ' + m.vals[0].toFixed(1) + 'x, a very rich starting point, which makes anything lower look cheap). Whether low valuation has actually preceded better returns is tested in the Score Lab (Run Study). Until a P/E signal shows an edge there, valuation stays out of the Entry Score and only shapes the "What they say together" summary. Earnings estimates are inferred as Nasdaq-100 price ÷ forward P/E, so they are approximate.</div></div></div>';
+  try { meValDraw(); } catch (e) { console.error('[AURUM ME val chart]', e); }
+}
+(function () { const b = document.getElementById('me-backdrop'); if (b) b.addEventListener('toggle', function () { if (this.open && meData.val && meData.val.ser) { try { meValDraw(); } catch (e) {} } }); })();
 
 // Initialise breadth display on load
 onMEBreadthChange();
@@ -13022,16 +13140,109 @@ function meCreditHtml() {
 function meBackdropSum() {
   const el = document.getElementById('me-backdrop-sum'); if (!el) return;
   const d = meData, mg = window.__marginRegime, chips = [];
-  const colr = v => /STRESS$|HEADWIND|LAGGING|ROTATION|UNWIND|CASCADE/.test(v) ? 'var(--red)' : /FADING|COOLING|STRESSED|ELEVATED/.test(v) ? '#ff8844' : /CALM|TAILWIND|LEADING|STRONG|NORMAL|LOW|FLUSH/.test(v) ? 'var(--green)' : 'var(--gold)';
+  const colr = v => /STRESS$|HEADWIND|LAGGING|ROTATION|UNWIND|CASCADE|RICH|HIKES/.test(v) ? 'var(--red)' : /FADING|COOLING|STRESSED|ELEVATED/.test(v) ? '#ff8844' : /CALM|TAILWIND|LEADING|STRONG|NORMAL|LOW|FLUSH|CHEAP|CUTS/.test(v) ? 'var(--green)' : 'var(--gold)';
   const add = (l, v) => { if (v) chips.push('<span style="font-size:10px;color:var(--ghost);margin-right:12px;white-space:nowrap">' + l + ' <b style="color:' + colr(String(v).toUpperCase()) + '">' + String(v).toLowerCase() + '</b></span>'); };
+  add('valuation', d.val && d.val.state);
   add('yields', d.macro && d.macro.cur ? d.macro.cur.flag : null);
   add('credit', d.credit && d.credit.state);
+  add('Fed path', d.fed && d.fed.state);
   add('semis', d.semis && d.semis.state);
   const t = d.tlt; if (t && t.dd !== undefined) add('tech vs bonds', t.dd <= -10 && t.c20 <= -8 ? 'ROTATION OUT OF TECH' : t.dd <= -5 ? 'COOLING' : t.dd > -3 && t.c60 > 0 ? 'STRONG' : 'NEUTRAL');
   add('your book', d.book && d.book.state);
   el.innerHTML = '<span style="margin-right:16px">Backdrop — context panels, not scored</span>' + (chips.length ? chips.join('') : '<span style="font-size:10px;color:var(--ghost)">loading…</span>');
 }
 (function () { const f = meTltRender; meTltRender = function () { f.apply(this, arguments); try { meBackdropSum(); } catch (e) {} }; })();
+
+// ═══════════════════════════════════════════════
+// FED POLICY PATH — from the FedWatch tab (context, not scored)
+// Tab layout: A1 "Last Updated:" B1 timestamp · row 2 headers · rows 3+ = meeting date, contract, futures price,
+// implied rate, then one probability column per target range (e.g. 400-425).
+// ═══════════════════════════════════════════════
+const FED_SNAP_KEY = 'aurum_fed_snaps', FED_CUR_KEY = 'aurum_fed_cur';
+function fedParse(rows) {
+  if (!rows || rows.length < 3) return null;
+  const hdr = rows[1] || [], stamp = String((rows[0] || [])[1] || '').trim(), bk = [];
+  hdr.forEach((h, i) => { const m = String(h).match(/(\d{3})\s*[-–]\s*(\d{3})/); if (m) bk.push({ i, lo: +m[1], hi: +m[2], mid: (+m[1] + +m[2]) / 2 }); });
+  if (bk.length < 2) return null;
+  const mt = [];
+  rows.slice(2).forEach(r => {
+    const d = String(r[0] || '').trim(); if (!/^\d{4}-\d{2}-\d{2}/.test(d)) return;
+    let p = bk.map(b => { const v = parseFloat(String(r[b.i] === undefined ? '' : r[b.i]).replace('%', '').replace(',', '.')); return isFinite(v) && v > 0 ? v : 0; });
+    const s = p.reduce((a, b) => a + b, 0); if (s <= 0) return;
+    mt.push({ date: d.slice(0, 10), contract: String(r[1] || ''), implied: parseFloat(r[3]), p: p.map(v => v / s) });   // normalising makes "70%" and 0.70 equivalent
+  });
+  mt.sort((a, b) => a.date < b.date ? -1 : 1);
+  const km = String(((rows[2] || [])[10]) || '').match(/(\d+(?:[.,]\d+)?)\s*%?\s*[-–—]\s*(\d+(?:[.,]\d+)?)/);   // K3: "3.75% – 4.00%"
+  const cur = km ? { lo: Math.round(parseFloat(km[1].replace(',', '.')) * 100), hi: Math.round(parseFloat(km[2].replace(',', '.')) * 100) } : null;
+  return mt.length ? { stamp, bk, mt, cur } : null;
+}
+function fedCompute(f) {
+  const bk = f.bk, mt = f.mt, now = new Date(); let saved = null, cur = f.cur, src = 'sheet';
+  if (!cur) {
+    try { saved = localStorage.getItem(FED_CUR_KEY); } catch (e) {}
+    const sb = bk.find(b => b.lo + '-' + b.hi === saved);
+    if (sb) { cur = { lo: sb.lo, hi: sb.hi }; src = 'manual'; }
+    else { const k = mt[0].p.indexOf(Math.max.apply(null, mt[0].p)); cur = { lo: bk[k].lo, hi: bk[k].hi }; src = 'assumed'; }
+  }
+  const cm = (cur.lo + cur.hi) / 2, assumed = src === 'assumed';
+  const rows = mt.map(m => {
+    const exp = m.p.reduce((s, v, j) => s + v * bk[j].mid, 0);
+    return Object.assign({}, m, { exp, chg: exp - cm, hike: m.p.reduce((s, v, j) => s + (bk[j].lo > cur.lo ? v : 0), 0), cut: m.p.reduce((s, v, j) => s + (bk[j].lo < cur.lo ? v : 0), 0), hold: m.p.reduce((s, v, j) => s + (bk[j].lo === cur.lo ? v : 0), 0), days: Math.round((new Date(m.date + 'T12:00:00') - now) / 864e5) });
+  });
+  rows.forEach((r, k) => { r.step = k ? r.chg - rows[k - 1].chg : r.chg; });
+  const h6 = rows.find(r => r.days >= 150) || rows[rows.length - 1], end = rows[rows.length - 1];
+  const state = h6.chg >= 12.5 ? 'HIKES PRICED' : h6.chg <= -12.5 ? 'CUTS PRICED' : 'ON HOLD';
+  const sd = /^\d{4}-\d{2}-\d{2}/.test(f.stamp) ? f.stamp.slice(0, 10) : opxKey(now);
+  const age = isFinite(new Date(f.stamp)) ? Math.floor((now - new Date(f.stamp)) / 864e5) : null;
+  let snaps = []; try { snaps = JSON.parse(localStorage.getItem(FED_SNAP_KEY) || '[]'); } catch (e) {}
+  const cut5 = new Date(sd + 'T12:00:00'); cut5.setDate(cut5.getDate() - 5);
+  const prior = snaps.filter(s => s.d <= opxKey(cut5)).sort((a, b) => a.d < b.d ? -1 : 1).pop() || null;
+  snaps = snaps.filter(s => s.d !== sd); snaps.push({ d: sd, chg6: +h6.chg.toFixed(2), chgEnd: +end.chg.toFixed(2), hikeNext: +rows[0].hike.toFixed(3) }); snaps = snaps.slice(-150);
+  try { localStorage.setItem(FED_SNAP_KEY, JSON.stringify(snaps)); } catch (e) {}
+  return { bk, rows, cur, cm, assumed, src, h6, end, state, stamp: f.stamp, age, prior, nSnaps: snaps.length };
+}
+async function meFedLoad(force) {
+  if (meData.fedBusy || (meData.fed && !force)) return;
+  if (typeof SHEET_ID === 'undefined' || !SHEET_ID) return;
+  meData.fedBusy = true;
+  try { const f = fedParse(await fetchSheet('FedWatch')); meData.fed = f ? fedCompute(f) : { missing: true }; }
+  catch (e) { meData.fed = { error: e.message }; }
+  meData.fedBusy = false; meFedRender(); renderMEScore();
+}
+function fedSetCur(v) { try { localStorage.setItem(FED_CUR_KEY, v); } catch (e) {} meData.fed = null; meFedLoad(true); }
+function meFedRender() {
+  const el = document.getElementById('me-fed'); if (!el) return;
+  const m = meData.fed, head = '<div class="panel"><div class="panel-header"><div class="panel-title">Fed policy path — what the market prices (FedWatch)</div><div style="font-size:10px;color:var(--ghost)">Context · not part of the score</div></div><div class="panel-body">';
+  if (!m) { el.innerHTML = ''; return; }
+  if (m.missing || m.error) { el.innerHTML = head + '<div class="alert warning">' + (m.error || 'FedWatch tab not found, or its headers could not be read.') + '</div><div style="font-size:11px;color:var(--text-dim);line-height:1.8">Expected layout: current range in K3 (e.g. <code style="color:var(--gold)">3.75% – 4.00%</code>), row 2 headers <code style="color:var(--gold)">MEETING DATE · CONTRACT · FUTURES PRICE · IMPLIED RATE (%)</code> followed by one column per target range such as <code style="color:var(--gold)">400-425</code>; one row per meeting from row 3.</div></div></div>'; return; }
+  const R = m.rows, bk = m.bk, cur = m.cur, nx = R[0], f1 = x => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(0) + ' bp', pc = x => (x * 100).toFixed(0) + '%';
+  const col = { 'HIKES PRICED': 'var(--red)', 'CUTS PRICED': 'var(--green)', 'ON HOLD': 'var(--gold)' }[m.state];
+  const nHk = Math.abs(m.h6.chg) / 25, dt = d => new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const yf = meData.macro && meData.macro.cur ? meData.macro.cur.flag : null;
+  const txt = { 'HIKES PRICED': 'Futures price the Fed raising rates: about ' + nHk.toFixed(1) + ' hike(s) of 25 bp by ' + dt(m.h6.date) + '. Higher policy rates pressure growth valuations and tend to push yields up, which is the environment where tech dips run longer. Stage lump sums over several weeks and prefer names with strong balance sheets.',
+    'CUTS PRICED': 'Futures price the Fed cutting: about ' + nHk.toFixed(1) + ' cut(s) of 25 bp by ' + dt(m.h6.date) + '. Easing helps growth valuations, but cuts priced in a hurry often reflect a weakening economy, so read it together with credit and the entry score.',
+    'ON HOLD': 'Little net change is priced over the next six months. Policy is not a driver either way, so the entry score and the other panels decide.' }[m.state];
+  const link = m.state === 'HIKES PRICED' && yf === 'HEADWIND' ? ' Yields are already rising fast, so policy and the bond market agree: this is a genuine valuation headwind.' : m.state === 'HIKES PRICED' && yf === 'TAILWIND' ? ' Yields are falling despite hike pricing, so the bond market is not buying the hawkish story.' : m.state === 'CUTS PRICED' && yf === 'HEADWIND' ? ' Yields are rising despite cut pricing, which is unusual: check for inflation or supply worries.' : '';
+  const card = (l, v, s, c) => '<div class="stat-card"><div class="stat-label">' + l + '</div><div class="stat-value" style="font-size:22px;color:' + (c || 'var(--platinum)') + '">' + v + '</div><div class="stat-change neutral" style="line-height:1.5">' + s + '</div></div>';
+  const pr = m.prior, dlt = pr ? m.h6.chg - pr.chg6 : null;
+  const segCol = j => { const d = bk[j].lo - cur.lo; return d < 0 ? 'var(--green)' : d === 0 ? '#6a6a88' : d <= 25 ? '#ff8844' : 'var(--red)'; };
+  const bar = r => '<div style="display:flex;height:14px;min-width:220px;border-radius:2px;overflow:hidden;background:var(--surface3)">' + r.p.map((p, j) => p > 0.004 ? '<div title="' + bk[j].lo + '–' + bk[j].hi + ': ' + pc(p) + '" style="width:' + p * 100 + '%;background:' + segCol(j) + ';font-size:8px;color:#0a0a0c;text-align:center;line-height:14px;overflow:hidden">' + (p >= 0.12 ? (p * 100).toFixed(0) : '') + '</div>' : '').join('') + '</div>';
+  const rowsH = R.map((r, k) => '<tr><td>' + dt(r.date) + '<br><span style="font-size:9px;color:var(--ghost)">' + (r.days >= 0 ? 'in ' + r.days + ' days' : 'past') + (k === 0 ? ' · next' : '') + '</span></td>' +
+    '<td class="td-dim">' + (isFinite(r.implied) ? r.implied.toFixed(2) + '%' : '—') + '</td><td style="color:var(--green)">' + pc(r.cut) + '</td><td class="td-dim">' + pc(r.hold) + '</td><td style="color:var(--red)">' + pc(r.hike) + '</td>' +
+    '<td style="font-weight:700;color:' + (r.chg > 4 ? 'var(--red)' : r.chg < -4 ? 'var(--green)' : 'var(--platinum)') + '">' + f1(r.chg) + '</td><td class="td-dim">' + (k ? f1(r.step) : '—') + '</td><td>' + bar(r) + '</td></tr>').join('');
+  const opts = bk.map((b, j) => '<option value="' + b.lo + '-' + b.hi + '"' + (b.lo === cur.lo ? ' selected' : '') + '>' + b.lo + '–' + b.hi + ' bp</option>').join('');
+  const ageW = m.age !== null && m.age > 2 ? '<div class="alert warning" style="margin-bottom:12px">FedWatch data was last updated ' + m.stamp.slice(0, 16).replace('T', ' ') + ' (' + m.age + ' days ago). Odds move quickly, so refresh the tab before relying on this.</div>' : '';
+  const asW = m.assumed ? '<div class="alert warning" style="margin-bottom:12px"><strong>Current rate range is a guess.</strong> AURUM assumed the most likely range after the next meeting (' + cur.lo + '–' + cur.hi + ' bp). Cell K3 of the FedWatch tab was empty or unreadable. Pick the real current range, since every "hike / cut" figure is measured from it.</div>' : '';
+  el.innerHTML = head + ageW + asW + '<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px"><div style="font-size:20px;font-weight:600;color:' + col + '">' + m.state + '</div><div style="font-size:11px;color:var(--ghost)">Fed funds range today: ' + (m.src === 'sheet' ? '<b style="color:var(--platinum)">' + (cur.lo / 100).toFixed(2) + '–' + (cur.hi / 100).toFixed(2) + '%</b> (from FedWatch!K3)' : '<select class="form-input" style="width:auto;padding:4px 8px;display:inline-block" onchange="fedSetCur(this.value)">' + opts + '</select>') + '</div></div>' +
+    '<div style="font-size:12px;color:var(--text-dim);line-height:1.7;margin-bottom:14px;max-width:780px">' + txt + link + '</div>' +
+    '<div class="stats-grid stats-grid-4" style="margin-bottom:14px">' + card('Next meeting', (nx.hike >= nx.hold && nx.hike >= nx.cut ? pc(nx.hike) + ' hike' : nx.cut > nx.hold ? pc(nx.cut) + ' cut' : pc(nx.hold) + ' hold'), dt(nx.date) + ' · hold ' + pc(nx.hold) + ' · hike ' + pc(nx.hike) + ' · cut ' + pc(nx.cut), nx.hike >= 0.5 ? 'var(--red)' : nx.cut >= 0.5 ? 'var(--green)' : '') +
+      card('Priced by ' + dt(m.h6.date).replace(/^\d+ /, ''), f1(m.h6.chg), '≈ ' + nHk.toFixed(1) + ' × 25 bp ' + (m.h6.chg >= 0 ? 'hike' : 'cut') + (nHk === 1 ? '' : 's'), col) +
+      card('Priced by ' + dt(m.end.date).replace(/^\d+ /, ''), f1(m.end.chg), 'end of the curve in the tab', m.end.chg >= 12.5 ? 'var(--red)' : m.end.chg <= -12.5 ? 'var(--green)' : '') +
+      card('Change since ' + (pr ? pr.d : 'last week'), dlt === null ? '—' : f1(dlt), dlt === null ? 'builds from your own snapshots (' + m.nSnaps + ' saved)' : dlt >= 6 ? 'market turning more hawkish' : dlt <= -6 ? 'market turning more dovish' : 'little change in the path', dlt === null ? '' : dlt >= 6 ? 'var(--red)' : dlt <= -6 ? 'var(--green)' : '') + '</div>' +
+    '<div style="overflow-x:auto"><table class="data-table" style="min-width:820px"><thead><tr><th>Meeting</th><th>Implied rate</th><th>Cut</th><th>Hold</th><th>Hike</th><th title="Probability-weighted target range midpoint minus today\'s midpoint">Priced vs today</th><th title="Change versus the previous meeting">Step</th><th>Odds by target range</th></tr></thead><tbody>' + rowsH + '</tbody></table></div>' +
+    '<div style="font-size:10px;color:var(--ghost);margin-top:8px"><span style="color:var(--green)">■</span> below today · <span style="color:#6a6a88">■</span> today\'s range · <span style="color:#ff8844">■</span> one hike · <span style="color:var(--red)">■</span> two or more hikes. Priced vs today uses range midpoints (25 bp per step). Data: FedWatch tab, updated ' + m.stamp.slice(0, 16).replace('T', ' ') + '.</div>' +
+    '<div style="font-size:10px;color:var(--ghost);line-height:1.8;margin-top:10px"><strong>How to use it:</strong> the odds describe what traders expect, and they swing with each inflation or jobs report, so the <em>change</em> in the path matters more than the level. It is context about valuation pressure, not a timing trigger. It is kept out of the score because it cannot be backtested: the tab only holds today\'s odds. AURUM saves one snapshot per data date in this browser, so after a few weeks the "change since" card becomes your own evidence of how pricing shifted around your entries.</div></div></div>';
+}
 
 function meLogGet() { try { return JSON.parse(localStorage.getItem('aurum_me_log') || '[]'); } catch (e) { return []; } }
 async function meLogSave(auto) {
@@ -13054,7 +13265,7 @@ async function meLogRender() {
     (rows.length ? '<div style="overflow-x:auto"><table class="data-table" style="min-width:560px"><thead><tr><th>Date</th><th>Score</th><th>NDX then</th><th>10Y flag</th><th>+1 month</th><th>+3 months</th></tr></thead><tbody>' + rows.slice(0, 30).map(x => '<tr><td>' + x.date + '</td><td style="font-weight:700;color:var(--gold)">' + x.score + (x.model === 2 ? '' : ' <span style="font-size:9px;color:var(--ghost)">old model</span>') + '</td><td class="td-dim">' + (x.ndx ? Math.round(x.ndx).toLocaleString('en-US') : '—') + '</td><td class="td-dim">' + (x.flag || '—') + '</td><td>' + P(x.f1) + '</td><td>' + P(x.f3) + '</td></tr>').join('') + '</tbody></table></div>' +
       '<div style="font-size:9px;letter-spacing:2px;color:var(--ghost);text-transform:uppercase;margin:14px 0 6px">Average NDX move 1 month later, by score</div><table class="data-table" style="max-width:420px"><thead><tr><th>Score band</th><th>Entries</th><th>Avg +1M</th></tr></thead><tbody>' + bk('65+ strong entry', s => s >= 65) + bk('30–64 favourable / suitable', s => s >= 30 && s < 65) + bk('below 30 patient / wait', s => s < 30) + '</tbody></table><div style="font-size:10px;color:var(--ghost);margin-top:8px">Fewer than ~15 entries per band is anecdote, not evidence.</div>' : '<div style="font-size:12px;color:var(--ghost)">No entries yet.</div>');
 }
-(function () { const f = fetchMarketEntry; fetchMarketEntry = async function () { await f.apply(this, arguments); try { meMacroLoad(true); await meLogSave(true); } catch (e) {} }; })();
+(function () { const f = fetchMarketEntry; fetchMarketEntry = async function () { await f.apply(this, arguments); try { meMacroLoad(true); meFedLoad(true); await meLogSave(true); } catch (e) {} }; })();
 
 // ═══════════════════════════════════════════════
 // PLAIN-ENGLISH READING GUIDE + "WHAT THEY SAY TOGETHER"
@@ -13064,6 +13275,12 @@ const ME_TIPS = {
   'NDX vs S&amp;P (200-DMA)': 'Negative: tech lags the broad market. Positive: tech leads it.',
   'Nasdaq − S&amp;P breadth': 'Negative: fewer tech stocks hold their 50-day average than S&P stocks, so weakness is concentrated in tech.',
   'VXN − VIX': 'Extra fear priced into tech options. Well above +6 means tech-specific stress.',
+  'Forward P/E': 'Nasdaq-100 price divided by expected next-12-month earnings. Lower means cheaper.',
+  '5-year percentile': 'Share of days in your tab when the multiple was at or below today\'s. Under 10 is the cheapest tenth.',
+  'vs 5-year average': 'How far today\'s multiple is from its average over the tab.',
+  'vs series low': 'Distance above the lowest multiple in the tab.',
+  'P/E change, 3 months': 'Falling P/E can come from falling prices or rising earnings estimates. The next two cards split it.',
+  'Earnings estimates, 3M': 'Rising means analysts are raising forward earnings, so a lower P/E is healthier.',
   'SOX vs 200-DMA': 'Chips below their long-term average while the index holds is an early warning.',
   'SOX − NDX, 20 days': 'Short-term leadership. Negative: chips are lagging the index.',
   'SOX − NDX, 60 days': 'Medium-term leadership trend.',
@@ -13085,23 +13302,33 @@ function meSynth() {
   const missing = [d.fgi, v, n, d.aaiiSpread, d.pcr].some(x => x == null);
   const hs = (sheetData.holdings || []).filter(h => h.ma50 > 0 && h.livePrice > 0), pb = hs.length ? hs.filter(h => h.livePrice >= h.ma50).length / hs.length * 100 : null;
   const semis = d.semis && d.semis.state, bad = semis === 'LAGGING' || semis === 'FADING';
-  const flag = d.macro && d.macro.cur ? d.macro.cur.flag : null, mg = window.__marginRegime;
+  const flag = d.macro && d.macro.cur ? d.macro.cur.flag : null, mg = window.__marginRegime, fedS = d.fed && d.fed.state ? d.fed.state : null;
   const lev = mg && (mg.key === 'cascade' || mg.key === 'elevated');
   const bookWeak = pb !== null && pb < 30, techLag = n != null && sp != null && n < sp - 2;
   const band = sc >= 65 ? ['Strong entry window', 'var(--green)'] : sc >= 50 ? ['Favourable', '#8BC34A'] : sc >= 30 ? ['Suitable', 'var(--gold)'] : sc >= 15 ? ['Patient', '#FF7043'] : ['Wait', 'var(--red)'];
-  const cautions = [bad ? 'semis are ' + semis.toLowerCase() : null, flag === 'HEADWIND' ? 'yields are a headwind' : null, d.credit && d.credit.state === 'STRESS' ? 'credit is stressed' : null, lev ? 'market leverage is elevated' : null, bookWeak ? 'your own book is weak' : null].filter(Boolean);
+  const cautions = [bad ? 'semis are ' + semis.toLowerCase() : null, flag === 'HEADWIND' ? 'yields are a headwind' : null, fedS === 'HIKES PRICED' ? 'the market prices Fed hikes' : null, d.credit && d.credit.state === 'STRESS' ? 'credit is stressed' : null, lev ? 'market leverage is elevated' : null, bookWeak ? 'your own book is weak' : null].filter(Boolean);
   let character;
   if (on.length >= 4) character = 'Broad washout: most fear signals are firing together.';
   else if (on.length <= 2 && (bad || bookWeak || techLag)) character = 'Weakness looks concentrated in tech' + (bookWeak ? ' and your own holdings' : '') + ', not a market-wide washout.';
   else if (on.length <= 1) character = 'Calm underneath: few fear signals are firing, so there is no washout yet.';
   else character = 'Mixed picture: some fear signals are firing, but not enough for a clear washout.';
-  const backdrop = [flag ? '10-year yield: ' + flag.toLowerCase() : null, mg ? 'margin leverage: ' + mg.label.toLowerCase() : null, semis ? 'semis: ' + semis.toLowerCase() : null].filter(Boolean).join(' · ') || 'not loaded yet';
+  const vl = d.val && d.val.state ? d.val : null;
+  const valBit = vl ? 'NDX valuation: ' + vl.state.toLowerCase() + ' (' + vl.v.toFixed(1) + 'x forward P/E, ' + vl.pct.toFixed(0) + 'th percentile)' : null;
+  let valText = '';
+  if (vl) {
+    if (vl.state === 'CHEAP') valText = on.length >= 3 ? 'Cheap multiple and washout signals agree: the strongest valuation-backed case for deploying, still in tranches.' : 'Cheap, but only ' + on.length + ' washout signal' + (on.length === 1 ? '' : 's') + ' firing. Cheap can get cheaper, so valuation supports patience and staged buying, not rushing.';
+    else if (vl.state === 'RICH') valText = 'Expensive versus its own history: little valuation cushion, so favour staged entries.';
+    else if (vl.state === 'FAIR-LOW') valText = 'Below average valuation, a modest cushion.';
+    else valText = 'Around its norm: valuation neither helps nor hurts.';
+    valText += ' (' + vl.v.toFixed(1) + 'x vs ' + vl.avg.toFixed(1) + 'x average.)';
+  }
+  const backdrop = [valBit, fedS ? 'Fed path: ' + fedS.toLowerCase() : null, flag ? '10-year yield: ' + flag.toLowerCase() : null, mg ? 'margin leverage: ' + mg.label.toLowerCase() : null, semis ? 'semis: ' + semis.toLowerCase() : null].filter(Boolean).join(' · ') || 'not loaded yet';
   let action = sc >= 65 ? 'Washout signals line up with a workable market: deploy in 3 tranches over 4–6 weeks, first third now' : sc >= 50 ? 'Conditions favour adding: your regular amount plus one extra tranche' : sc >= 30 ? 'No washout, but trend and conditions support investing: deploy your regular monthly amount' : sc >= 15 ? 'Mixed conditions: keep to a small regular amount and hold back lump sums' : 'Trend is weak with no washout evidence yet: hold back new money';
   action += cautions.length ? '. Watch: ' + cautions.join(', ') + '.' : '.';
   const row = (l, t) => '<div style="display:grid;grid-template-columns:110px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid rgba(212,175,55,0.06);font-size:12px;line-height:1.7"><span style="font-size:9px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;padding-top:3px">' + l + '</span><span style="color:var(--text-dim)">' + t + '</span></div>';
   el.innerHTML = '<div class="panel" style="border-color:' + band[1] + '"><div class="panel-header"><div class="panel-title">What they say together</div><div style="font-size:12px;font-weight:700;color:' + band[1] + '">' + sc + ' · ' + band[0] + '</div></div><div class="panel-body" style="padding-top:8px">' +
     row('Signals', '<strong style="color:var(--platinum)">' + on.length + ' of ' + sig.length + '</strong> washout signals firing' + (on.length ? ': ' + on.join(', ') : '') + '. Not firing: ' + (off.length ? off.join(', ') : 'none') + '.' + (missing ? ' <span style="color:var(--gold)">Some inputs are not loaded: fetch live data for a full read.</span>' : '')) +
-    row('Character', character) + row('Backdrop', backdrop + '. These add context and are not scored.') + (meData.book ? row('Book stress', meData.book.text) : '') + row('Your book', pb === null ? 'No position data loaded.' : pb.toFixed(0) + '% of your positions are above their 50-day average' + (bookWeak ? ', so your holdings are more stressed than the index.' : '.')) +
+    row('Character', character) + row('Backdrop', backdrop + '. These add context and are not scored.') + (vl ? row('Valuation', valText) : '') + (meData.book ? row('Book stress', meData.book.text) : '') + row('Your book', pb === null ? 'No position data loaded.' : pb.toFixed(0) + '% of your positions are above their 50-day average' + (bookWeak ? ', so your holdings are more stressed than the index.' : '.')) +
     '<div style="padding:12px 0 2px;font-size:13px;line-height:1.7;color:var(--platinum)"><span style="color:' + band[1] + '">▸</span> ' + action + '</div>' +
     '<div style="font-size:10px;color:var(--ghost);margin-top:6px">A reading of current conditions, not a prediction. The score weights are untested until your score log builds evidence.</div></div></div>';
 }
@@ -13120,7 +13347,7 @@ async function labRun() {
   const out = document.getElementById('lab-out');
   out.innerHTML = '<div style="color:var(--ghost);font-size:12px">Loading all history tabs…</div>';
   try {
-    const [nd, vxr, ys0, fgR, aaR, c1R, c2R, ndfR, qqR, vnR, tlR, hyR, ieR] = await Promise.all([meNdxSeries(), labTab('PE_Data', 'A1:Z4000'), meYieldsRead().catch(() => null), labTab('fear_greedHistory'), labTab('AAIIHistory'), labTab('CboeHistory'), labTab('CboeHistory_2'), labTab('NDFIHistory'), labTab('QQQShortHistory'), labTab('VXNHistory'), labTab('TLTHistory'), labTab('HYGHistory'), labTab('IEFHistory')]);
+    const [nd, vxr, ys0, fgR, aaR, c1R, c2R, ndfR, qqR, vnR, tlR, hyR, ieR, vlR] = await Promise.all([meNdxSeries(), labTab('PE_Data', 'A1:Z4000'), meYieldsRead().catch(() => null), labTab('fear_greedHistory'), labTab('AAIIHistory'), labTab('CboeHistory'), labTab('CboeHistory_2'), labTab('NDFIHistory'), labTab('QQQShortHistory'), labTab('VXNHistory'), labTab('TLTHistory'), labTab('HYGHistory'), labTab('IEFHistory'), labTab('NDXValuation', 'A1:C6000')]);
     const n = nd.length, C = nd.map(x => x.c); if (n < 400) throw new Error('PriceHistory has only ' + n + ' bars.');
     let vx = peSeries(vxr, 10, 11).map(x => ({ k: x.d, v: x.c })), ys = ys0 || [];
     if (vx.length < 500) { let best = []; for (let ci = 0; ci < 25; ci++) for (let vi = ci + 1; vi <= ci + 2; vi++) { const sr = labSer(vxr, ci, vi).filter(x => x.v > 5 && x.v < 100); if (sr.length < 1000) continue; const md = sr.map(x => x.v).sort((a, b) => a - b)[sr.length >> 1]; if (md >= 10 && md <= 30 && sr.length > best.length) best = sr; } vx = best; }
@@ -13145,6 +13372,8 @@ async function labRun() {
     const hy = labSer(hyR, 0, 4).filter(x => x.v > 10), ie = labSer(ieR, 0, 4).filter(x => x.v > 10), aH = labAlign(hy, nd, 6), aE = labAlign(ie, nd, 6), cr = [], crdd = [], cr20 = [];
     for (let i = 0; i < n; i++) cr[i] = aH[i] >= 0 && aE[i] >= 0 ? hy[aH[i]].v / ie[aE[i]].v : null;
     for (let i = 0; i < n; i++) { let hi = -Infinity; for (let j = Math.max(0, i - 251); j <= i; j++) if (cr[j] !== null && cr[j] > hi) hi = cr[j]; crdd[i] = cr[i] !== null && hi > 0 && i >= 252 ? (cr[i] / hi - 1) * 100 : null; cr20[i] = cr[i] !== null && i >= 20 && cr[i - 20] !== null ? (cr[i] / cr[i - 20] - 1) * 100 : null; }
+    const pe = labSer(vlR, 0, 1).filter(x => x.v > 5 && x.v < 80), aPE = labAlign(pe, nd, 6), pePct = pe.map((x, p) => { if (p < 250) return null; let c = 0; for (let q = 0; q < p; q++) if (pe[q].v <= x.v) c++; return c / p; });
+    const PE = i => aPE[i] >= 0 ? pe[aPE[i]].v : null, PEP = i => aPE[i] >= 0 ? pePct[aPE[i]] : null;
     const T = (v, f) => v === null || v === undefined ? null : f(v);
     const VIX = i => at(aV, vx, i), VXN = i => at(aVN, vn, i), FG = i => at(aF, fg, i), AA = i => at(aA, aa, i), PC = i => at(aP, pc, i), NF = i => at(aN, nf, i);
     const QR = i => aQ[i] >= 0 ? qs[aQ[i]].rank : null, QC = i => aQ[i] >= 0 ? qs[aQ[i]].chg3 : null;
@@ -13165,6 +13394,8 @@ async function labRun() {
       ['QQQ/TLT ratio ≥ 10% below 1y high', i => T(rdd[i], v => v <= -10)], ['QQQ/TLT 20-day drop ≥ 8%', i => T(r20[i], v => v <= -8)], ['QQQ/TLT 20-day drop ≥ 12%', i => T(r20[i], v => v <= -12)],
       ['Credit HYG/IEF ≥ 3% below 1y high', i => T(crdd[i], v => v <= -3)], ['Credit HYG/IEF ≥ 5% below 1y high', i => T(crdd[i], v => v <= -5)], ['Credit HYG/IEF 20-day drop ≥ 2%', i => T(cr20[i], v => v <= -2)],
       ['Credit ≥ 3% below high AND drawdown ≥ 10%', i => { const a = T(crdd[i], v => v <= -3), b = T(dd[i], v => v <= -10); return a === null || b === null ? null : a && b; }],
+      ['Fwd P/E ≤ 20x', i => T(PE(i), v => v <= 20)], ['Fwd P/E in cheapest 10% of its history so far', i => T(PEP(i), v => v <= 0.10)],
+      ['Fwd P/E cheapest 10% AND drawdown ≥ 10%', i => { const a = T(PEP(i), v => v <= 0.10), b = T(dd[i], v => v <= -10); return a === null || b === null ? null : a && b; }],
       ['Composite: 2+ of 6 firing', i => T(six(i), v => v >= 2)], ['Composite: 3+ of 6 firing', i => T(six(i), v => v >= 3)], ['Composite: 4+ of 6 firing', i => T(six(i), v => v >= 4)]
     ];
     const f63 = [], worst = [];
