@@ -13540,6 +13540,14 @@ async function labRun() {
       ['Rotation back to tech AND drawdown ≥ 10%', i => { const a = RT('recent', i), b = RT('u20', i), c = RT('c20', i), d = T(dd[i], v => v <= -10); return a === null || b === null || c === null || d === null ? null : (a >= 5 && b === 1 && c < 0 && d); }],
       ['Defensive crowding: all 3 sector ETFs near 1y high AND drawdown ≥ 10%', i => { const a = RT('nh', i), d = T(dd[i], v => v <= -10); return a === null || d === null ? null : (a >= 3 && d); }],
       ['Defensives unwinding: none near 1y high AND drawdown ≥ 10%', i => { const a = RT('nh', i), d = T(dd[i], v => v <= -10); return a === null || d === null ? null : (a === 0 && d); }],
+      ['Defensive rotation: Def/NDX ratio ≥ 5% above 200-DMA', i => T(RT('r200', i), v => v >= 5)],
+      ['Defensive rotation: Def/NDX ratio ≥ 10% above 200-DMA', i => T(RT('r200', i), v => v >= 10)],
+      ['Defensive rotation: ratio in top decile of past year', i => T(RT('pct', i), v => v >= 0.9)],
+      ['Flight to safety: Def/NDX ratio +4% in 20 days', i => T(RT('c20', i), v => v >= 4)],
+      ['Rotation back to tech: ratio under 20-DMA after a ≥5% spike', i => { const a = RT('recent', i), b = RT('u20', i), c = RT('c20', i); return a === null || b === null || c === null ? null : (a >= 5 && b === 1 && c < 0); }],
+      ['Rotation back to tech AND drawdown ≥ 10%', i => { const a = RT('recent', i), b = RT('u20', i), c = RT('c20', i), d = T(dd[i], v => v <= -10); return a === null || b === null || c === null || d === null ? null : (a >= 5 && b === 1 && c < 0 && d); }],
+      ['Defensive crowding: all 3 sector ETFs near 1y high AND drawdown ≥ 10%', i => { const a = RT('nh', i), d = T(dd[i], v => v <= -10); return a === null || d === null ? null : (a >= 3 && d); }],
+      ['Defensives unwinding: none near 1y high AND drawdown ≥ 10%', i => { const a = RT('nh', i), d = T(dd[i], v => v <= -10); return a === null || d === null ? null : (a === 0 && d); }],
       ['Composite: 2+ of 6 firing', i => T(six(i), v => v >= 2)], ['Composite: 3+ of 6 firing', i => T(six(i), v => v >= 3)], ['Composite: 4+ of 6 firing', i => T(six(i), v => v >= 4)]
     ];
     const f63 = [], worst = [];
