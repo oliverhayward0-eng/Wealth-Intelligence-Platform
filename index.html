@@ -13290,6 +13290,84 @@ function meRotRender() {
 }
 (function () { const b = document.getElementById('me-backdrop'); if (b) b.addEventListener('toggle', function () { if (this.open && meData.rot && meData.rot.info) { try { meRotDraw(); } catch (e) {} } }); })();
 
+
+// ═══════════════════════════════════════════════
+// DEFENSIVE ROTATION — Utilities + Staples + Health Care sector ETFs vs Nasdaq-100 (context, not scored)
+// Tabs: XLUHistory, XLPHistory, XLVHistory (each with a GOOGLEFINANCE "all" formula in A1)
+// ═══════════════════════════════════════════════
+const ROT_TABS = [['XLUHistory', 'XLU', 'Utilities'], ['XLPHistory', 'XLP', 'Staples'], ['XLVHistory', 'XLV', 'Health Care']];
+async function meRotSeries() {
+  const nd = await meNdxSeries();
+  const raws = await Promise.all(ROT_TABS.map(t => labTab(t[0])));
+  const sers = raws.map(r => labSer(r, 0, 4).filter(x => x.v > 1));
+  const short = ROT_TABS.filter((t, i) => sers[i].length < 300).map(t => t[0]);
+  if (short.length) return { missing: short };
+  const maps = sers.map(a => { const m = {}; a.forEach(x => m[x.k] = x.v); return m; });
+  const rows = []; nd.forEach(b => { if (maps.every(m => m[b.k])) rows.push({ k: b.k, n: b.c, p: maps.map(m => m[b.k]) }); });
+  if (rows.length < 300) return { error: 'Only ' + rows.length + ' dates overlap between the three sector tabs and PriceHistory (need 300+).' };
+  const n = rows.length, b0 = rows[0].p, bk = rows.map(r => r.p.reduce((t, v, j) => t + v / b0[j], 0) / b0.length);
+  const ratio = rows.map((r, i) => bk[i] / (r.n / rows[0].n));
+  const ma200 = [], ma20 = [], r200 = [], c20 = [], u20 = [], recent = [], pct = [], nh = [];
+  let s200 = 0, s20 = 0;
+  for (let i = 0; i < n; i++) {
+    s200 += ratio[i]; if (i >= 200) s200 -= ratio[i - 200]; s20 += ratio[i]; if (i >= 20) s20 -= ratio[i - 20];
+    ma200[i] = i >= 199 ? s200 / 200 : null; ma20[i] = i >= 19 ? s20 / 20 : null;
+    r200[i] = ma200[i] ? (ratio[i] / ma200[i] - 1) * 100 : null;
+    c20[i] = i >= 20 ? (ratio[i] / ratio[i - 20] - 1) * 100 : null;
+    u20[i] = ma20[i] ? (ratio[i] < ma20[i] ? 1 : 0) : null;
+    let mx = null; if (i >= 218) { mx = -Infinity; for (let j = i - 19; j <= i; j++) mx = Math.max(mx, r200[j]); }
+    recent[i] = mx;
+    if (i >= 252) { let c = 0; for (let j = i - 252; j < i; j++) if (ratio[j] <= ratio[i]) c++; pct[i] = c / 252; } else pct[i] = null;
+    if (i >= 251) { let c = 0; for (let q = 0; q < b0.length; q++) { let hi = -Infinity; for (let j = i - 251; j <= i; j++) hi = Math.max(hi, rows[j].p[q]); if (rows[i].p[q] >= 0.98 * hi) c++; } nh[i] = c; } else nh[i] = null;
+  }
+  const mk = a => rows.map((r, i) => a[i] === null || a[i] === undefined ? null : { k: r.k, v: a[i] }).filter(Boolean);
+  const L = n - 1;
+  const state = r200[L] >= 5 && c20[L] > 0 ? 'FLIGHT TO SAFETY' : (recent[L] !== null && recent[L] >= 5 && u20[L] === 1 && c20[L] < 0) ? 'ROTATING BACK TO TECH' : r200[L] <= -5 ? 'TECH LEADING' : 'NEUTRAL';
+  const s0 = Math.max(0, n - 504);
+  return { ser: { r200: mk(r200), c20: mk(c20), u20: mk(u20), recent: mk(recent), pct: mk(pct), nh: mk(nh) },
+    info: { state, date: rows[L].k, from: rows[0].k, n, r200: r200[L], c20: c20[L], pct: pct[L], nh: nh[L], recent: recent[L], u20: u20[L],
+      labels: rows.slice(s0).map(r => r.k), ratio: ratio.slice(s0), ma: ma200.slice(s0),
+      age: Math.floor((new Date() - new Date(rows[L].k + 'T12:00:00')) / 864e5) } };
+}
+async function meRotLoad(force) {
+  if (meData.rotBusy || (meData.rot && !force)) return;
+  if (typeof SHEET_ID === 'undefined' || !SHEET_ID) return;
+  meData.rotBusy = true;
+  try { meData.rot = await meRotSeries(); } catch (e) { meData.rot = { error: e.message }; }
+  meData.rotBusy = false; meRotRender(); try { meBackdropSum(); } catch (e) {}
+}
+function meRotDraw() {
+  const m = meData.rot, cv = document.getElementById('meRotChart'); if (!m || !m.info || !cv) return;
+  destroyChart('meRot'); const i = m.info;
+  charts['meRot'] = new Chart(cv.getContext('2d'), { type: 'line',
+    data: { labels: i.labels, datasets: [
+      { label: 'Defensives / Nasdaq-100 (rebased)', data: i.ratio, borderColor: '#d4af37', borderWidth: 2, pointRadius: 0, tension: 0 },
+      { label: '200-day average', data: i.ma, borderColor: 'rgba(180,180,210,0.7)', borderDash: [5, 4], borderWidth: 1.2, pointRadius: 0 }] },
+    options: { ...chartDefaults, plugins: { legend: { labels: { color: '#b0b0cc', font: { size: 9 } } } },
+      scales: { x: { grid: { display: false }, ticks: { color: '#9090b0', font: { size: 9 }, maxTicksLimit: 8 } }, y: { grid: { color: 'rgba(212,175,55,0.05)' }, ticks: { color: '#9090b0' } } } } });
+}
+function meRotRender() {
+  const el = document.getElementById('me-rot'); if (!el) return;
+  const m = meData.rot, head = '<div class="panel"><div class="panel-header"><div class="panel-title">Defensive rotation — Utilities + Staples + Health Care vs Nasdaq-100</div><div style="font-size:10px;color:var(--ghost)">Context · not part of the score</div></div><div class="panel-body">';
+  if (!m) { el.innerHTML = ''; return; }
+  if (m.missing || m.error) {
+    el.innerHTML = head + '<div class="alert warning">' + (m.error || 'Missing or too-short tabs: ' + m.missing.join(', ') + '.') + '</div><div style="font-size:11px;color:var(--text-dim);line-height:1.9">Create three tabs and put one formula in cell A1 of each, then wait for them to fill:<br><strong style="color:var(--gold)">XLUHistory</strong>: <code style="color:var(--gold);word-break:break-all">=GOOGLEFINANCE("NYSEARCA:XLU","all",TODAY()-3650,TODAY(),"DAILY")</code><br><strong style="color:var(--gold)">XLPHistory</strong>: <code style="color:var(--gold);word-break:break-all">=GOOGLEFINANCE("NYSEARCA:XLP","all",TODAY()-3650,TODAY(),"DAILY")</code><br><strong style="color:var(--gold)">XLVHistory</strong>: <code style="color:var(--gold);word-break:break-all">=GOOGLEFINANCE("NYSEARCA:XLV","all",TODAY()-3650,TODAY(),"DAILY")</code><br>If one shows #N/A, retry with the NASDAQ: or BATS: prefix.</div></div></div>'; return; }
+  const i = m.info, sg = x => (x >= 0 ? '+' : '') + x.toFixed(1) + '%';
+  const col = { 'FLIGHT TO SAFETY': 'var(--red)', 'ROTATING BACK TO TECH': 'var(--green)', 'TECH LEADING': 'var(--green)', NEUTRAL: 'var(--gold)' }[i.state];
+  const txt = { 'FLIGHT TO SAFETY': 'Money is moving into defensives faster than into tech and the ratio is above its long-term average. That is the fear phase: it can run longer, so it says caution, not that the low is in. It matters most when tech is also washed out.',
+    'ROTATING BACK TO TECH': 'Defensives spiked against tech recently but the ratio has now slipped under its 20-day average and is falling. This is the handoff pattern you described: money leaving safe havens. Treat it as a hint that the fear phase is fading, and confirm with the Entry Score and breadth.',
+    'TECH LEADING': 'Tech is outperforming defensives and the ratio is well below its long-term average. Risk appetite is healthy, so there is no safe-haven crowding.',
+    NEUTRAL: 'No clear rotation in either direction.' }[i.state];
+  const card = (l, v, s, c) => '<div class="stat-card"><div class="stat-label">' + l + '</div><div class="stat-value" style="font-size:22px;color:' + (c || 'var(--platinum)') + '">' + v + '</div><div class="stat-change neutral">' + s + '</div></div>';
+  el.innerHTML = head + (i.age > 7 ? '<div class="alert warning" style="margin-bottom:12px">Sector data ends ' + i.date + ' (' + i.age + ' days old). Check the three sector tabs have refreshed.</div>' : '') +
+    '<div style="font-size:20px;font-weight:600;color:' + col + ';margin-bottom:6px">' + i.state + '</div><div style="font-size:12px;color:var(--text-dim);line-height:1.7;margin-bottom:14px;max-width:760px">' + txt + '</div>' +
+    '<div class="stats-grid stats-grid-4" style="margin-bottom:14px">' + card('Ratio vs 200-DMA', sg(i.r200), 'as of ' + i.date, i.r200 >= 5 ? 'var(--red)' : i.r200 <= -5 ? 'var(--green)' : '') + card('20-day change', sg(i.c20), 'speed of the rotation', i.c20 >= 4 ? 'var(--red)' : '') + card('1-year percentile', i.pct === null ? '—' : (i.pct * 100).toFixed(0) + 'th', 'high = defensives unusually favoured') + card('Sector ETFs near 1y high', i.nh === null ? '—' : i.nh + ' of 3', 'within 2% of 52-week high') + '</div>' +
+    '<div class="chart-container" style="height:260px"><canvas id="meRotChart"></canvas></div>' +
+    '<div style="font-size:10px;color:var(--ghost);line-height:1.8;margin-top:12px"><strong>How to read it:</strong> an equal-weight basket of XLU, XLP and XLV divided by the Nasdaq-100, so a rising line means defensives are beating tech. Built from ' + i.n.toLocaleString('en-US') + ' common days since ' + i.from + '. Sector ETFs carry no survivorship bias, unlike a list of today\'s S&amp;P stocks. The state labels are judgement calls. Whether any of them has preceded better Nasdaq-100 returns is tested in the <strong>Score Lab</strong> (press Run Study and look for the eight "Defensive rotation", "Rotation back" and "Defensive crowding / unwinding" rows). Until one shows an edge (z ≥ 2, 10+ events), this stays out of the Entry Score.</div></div></div>';
+  try { meRotDraw(); } catch (e) { console.error('[AURUM ME rot chart]', e); }
+}
+(function () { const b = document.getElementById('me-backdrop'); if (b) b.addEventListener('toggle', function () { if (this.open && meData.rot && meData.rot.info) { try { meRotDraw(); } catch (e) {} } }); })();
+
 const FED_SNAP_KEY = 'aurum_fed_snaps', FED_CUR_KEY = 'aurum_fed_cur';
 function fedParse(rows) {
   if (!rows || rows.length < 3) return null;
