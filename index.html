@@ -13198,7 +13198,8 @@ function meBackdropSum() {
   add('yields', d.macro && d.macro.cur ? d.macro.cur.flag : null);
   add('credit', d.credit && d.credit.state);
   add('Fed path', d.fed && d.fed.state);
-  add('semis', d.semis && d.semis.state);
+    add('semis', d.semis && d.semis.state);
+  add('rotation', d.rot && d.rot.info ? d.rot.info.state : null);
   add('rotation', d.rot && d.rot.info ? d.rot.info.state : null);
   const t = d.tlt; if (t && t.dd !== undefined) add('tech vs bonds', t.dd <= -10 && t.c20 <= -8 ? 'ROTATION OUT OF TECH' : t.dd <= -5 ? 'COOLING' : t.dd > -3 && t.c60 > 0 ? 'STRONG' : 'NEUTRAL');
   add('your book', d.book && d.book.state);
@@ -13478,7 +13479,7 @@ async function labRun() {
   const out = document.getElementById('lab-out');
   out.innerHTML = '<div style="color:var(--ghost);font-size:12px">Loading all history tabs…</div>';
   try {
-    const [nd, vxr, ys0, fgR, aaR, c1R, c2R, ndfR, qqR, vnR, tlR, hyR, ieR, vlR, rotS] = await Promise.all([meNdxSeries(), labTab('PE_Data', 'A1:Z4000'), meYieldsRead().catch(() => null), labTab('fear_greedHistory'), labTab('AAIIHistory'), labTab('CboeHistory'), labTab('CboeHistory_2'), labTab('NDFIHistory'), labTab('QQQShortHistory'), labTab('VXNHistory'), labTab('TLTHistory'), labTab('HYGHistory'), labTab('IEFHistory'), labTab('NDXValuation', 'A1:C6000'), meRotSeries().catch(() => null)]);
+    const [nd, vxr, ys0, fgR, aaR, c1R, c2R, ndfR, qqR, vnR, tlR, hyR, ieR, vlR, rotS] = await Promise.all([meNdxSeries(), labTab('PE_Data', 'A1:Z4000'), meYieldsRead().catch(() => null), labTab('fear_greedHistory'), labTab('AAIIHistory'), labTab('CboeHistory'), labTab('CboeHistory_2'), labTab('NDFIHistory'), labTab('QQQShortHistory'), labTab('VXNHistory'), labTab('TLTHistory'), labTab('HYGHistory'), labTab('IEFHistory'),labTab('NDXValuation', 'A1:C6000'), meRotSeries().catch(() => null)]);, meRotSeries().catch(() => null)]);
     const n = nd.length, C = nd.map(x => x.c); if (n < 400) throw new Error('PriceHistory has only ' + n + ' bars.');
     let vx = peSeries(vxr, 10, 11).map(x => ({ k: x.d, v: x.c })), ys = ys0 || [];
     if (vx.length < 500) { let best = []; for (let ci = 0; ci < 25; ci++) for (let vi = ci + 1; vi <= ci + 2; vi++) { const sr = labSer(vxr, ci, vi).filter(x => x.v > 5 && x.v < 100); if (sr.length < 1000) continue; const md = sr.map(x => x.v).sort((a, b) => a - b)[sr.length >> 1]; if (md >= 10 && md <= 30 && sr.length > best.length) best = sr; } vx = best; }
