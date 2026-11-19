@@ -13509,6 +13509,8 @@ async function labRun() {
     const T = (v, f) => v === null || v === undefined ? null : f(v);
     const rotAl = {}; if (rotS && rotS.ser) Object.keys(rotS.ser).forEach(k => { rotAl[k] = labAlign(rotS.ser[k], nd, 6); });
     const RT = (key, i) => { if (!rotS || !rotS.ser || !rotAl[key]) return null; const a = rotAl[key][i]; return a >= 0 ? rotS.ser[key][a].v : null; };
+    const rotAl = {}; if (rotS && rotS.ser) Object.keys(rotS.ser).forEach(k => { rotAl[k] = labAlign(rotS.ser[k], nd, 6); });
+    const RT = (key, i) => { if (!rotS || !rotS.ser || !rotAl[key]) return null; const a = rotAl[key][i]; return a >= 0 ? rotS.ser[key][a].v : null; };
     const VIX = i => at(aV, vx, i), VXN = i => at(aVN, vn, i), FG = i => at(aF, fg, i), AA = i => at(aA, aa, i), PC = i => at(aP, pc, i), NF = i => at(aN, nf, i);
     const QR = i => aQ[i] >= 0 ? qs[aQ[i]].rank : null, QC = i => aQ[i] >= 0 ? qs[aQ[i]].chg3 : null;
     const six = i => { const a = [T(dd[i], v => v <= -10), T(m200[i], v => v <= -4), T(rsi[i], v => v <= 30), T(VIX(i), v => v >= 25), T(FG(i), v => v <= 25), T(AA(i), v => v <= -10)]; return a.some(x => x === null) ? null : a.filter(Boolean).length; };
