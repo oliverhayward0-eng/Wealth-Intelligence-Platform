@@ -9442,129 +9442,130 @@ function onMEBreadthChange() {
 }
 
 async function fetchMarketEntry() {
-  const anthropicKey = localStorage.getItem('aurum_pg_api_key') || '';
-  if (!anthropicKey) {
-    document.getElementById('me-key-warning').style.display = 'block';
-    return;
-  }
   document.getElementById('me-key-warning').style.display = 'none';
   document.getElementById('me-loading').style.display = 'block';
   document.getElementById('me-grid').style.opacity = '0.3';
   document.getElementById('me-refresh-btn').textContent = '⏳ FETCHING...';
   document.getElementById('me-refresh-btn').disabled = true;
 
-  const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-  const prompt = `Today is ${today}. Read the live market indicators below from the EXACT pages named, and return ONLY a raw JSON object — no markdown, no backticks, no explanation before or after:
-
-{
-  "fgi": <CNN Fear & Greed Index current integer 0-100>,
-  "fgiLabel": <CNN classification, e.g. "Fear">,
-  "vix": <VIX spot price>,
-  "vixChangePct": <VIX percent change today, negative if down>,
-  "vixHigh52": <VIX 52 week high>,
-  "vixLow52": <VIX 52 week low>,
-  "vixAsOf": <date of the VIX data, YYYY-MM-DD>,
-  "vxn": <CBOE Nasdaq-100 Volatility Index (VXN) spot value>,
-  "vxnChangePct": <VXN percent change today, negative if down>,
-  "vxnHigh52": <VXN 52 week high>,
-  "vxnLow52": <VXN 52 week low>,
-  "vxnAsOf": <date of the VXN data, YYYY-MM-DD>,
-  "ma200pct": <S&P 500 percentage above or below its 200-day moving average, negative if below>,
-  "aaiiBull": <AAII latest weekly bullish %>,
-  "aaiiNeutral": <AAII latest weekly neutral %>,
-  "aaiiBear": <AAII latest weekly bearish %>,
-  "aaiiAvgBull": <historical average bullish %>,
-  "aaiiAvgNeutral": <historical average neutral %>,
-  "aaiiAvgBear": <historical average bearish %>,
-  "aaiiWeekEnding": <week ending date of the latest result, YYYY-MM-DD>,
-  "pcr": <Cboe EQUITY put/call ratio>,
-  "pcrCalls": <equity options call volume, integer>,
-  "pcrPuts": <equity options put volume, integer>,
-  "pcrDate": <trading date of the Cboe statistics, YYYY-MM-DD, or null if not shown>
-}
-
-SOURCES — fetch these exact pages and use no other source for these fields:
-- fgi, fgiLabel: https://edition.cnn.com/markets/fear-and-greed . If that page cannot be read, try https://production.dataviz.cnn.io/index/fearandgreed/graphdata (field fear_and_greed.score). Only if both fail, use a web search and still return a value.
-- vix, vixChangePct, vixHigh52, vixLow52, vixAsOf: https://www.cboe.com/tradable-products/vix/ ("Trade Data" VIX Spot Price and the 52 Week High/Low).
-- aaiiBull, aaiiNeutral, aaiiBear, averages, aaiiWeekEnding: https://www.aaii.com/sentimentsurvey ("This week's results").
-- pcr, pcrCalls, pcrPuts, pcrDate: https://www.cboe.com/markets/us/options/market-statistics/daily/ — the "EQUITY PUT/CALL RATIO" row (NOT total or index) and the VOLUME row of the "EQUITY OPTIONS" table.
-- vxn, vxnChangePct, vxnHigh52, vxnLow52, vxnAsOf: https://www.cboe.com/us/indices/dashboard/vxn/ (VXN spot value and 52 week range). If it cannot be read, return null. Do NOT substitute VIX.
-- ma200pct: search the web.
-Return ONLY the JSON object.`;
-
   try {
-    meSemisLoad(true);
-    const [spx200, ndx200] = await Promise.all([meComputeMa200('SP500History'), meComputeMa200('PriceHistory')]);
-    const callApi = (withFetch) => fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'web-fetch-2025-09-10',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 2200,
-        tools: withFetch
-          ? [{ type: 'web_search_20250305', name: 'web_search' }, { type: 'web_fetch_20250910', name: 'web_fetch', max_uses: 6, allowed_domains: ['www.cboe.com', 'www.aaii.com', 'edition.cnn.com', 'production.dataviz.cnn.io'] }]
-          : [{ type: 'web_search_20250305', name: 'web_search' }],
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-    let res = await callApi(true);
-    let data = await res.json();
-    let fetchTool = true;
-    if (!res.ok) { fetchTool = false; res = await callApi(false); data = await res.json(); }
-    const fetchedUrls = fetchTool ? (data.content || []).filter(b => b.type === 'web_fetch_tool_result' && b.content && !b.content.error_code).map(b => String(b.content.url || '')) : [];
-    const got = k => fetchedUrls.some(u => u.includes(k));
-    const cboeRead = got('market-statistics/daily');
+    await Promise.all([
+      meSemisLoad(true),
+      meMacroLoad(true),
+      meFedLoad(true),
+      typeof meQqqLoad === 'function' ? meQqqLoad() : Promise.resolve(),
+      typeof meCftcLoad === 'function' ? meCftcLoad(true) : Promise.resolve(),
+      typeof meValLoad === 'function' ? meValLoad() : Promise.resolve(),
+      typeof meRotLoad === 'function' ? meRotLoad(true) : Promise.resolve(),
+      typeof meBookLoad === 'function' ? meBookLoad() : Promise.resolve()
+    ]);
 
-    if (!res.ok) {
-      const apiMsg = data?.error?.message || ('HTTP ' + res.status);
-      console.error('[AURUM ME] API error:', data);
-      document.getElementById('me-fetched-at').textContent = 'API error: ' + apiMsg;
-      throw new Error(apiMsg);
-    }
+    const [spx200, ndx200, sv, fgR, aaR, c1R, c2R, vnR] = await Promise.all([
+      meComputeMa200('SP500History'),
+      meComputeMa200('PriceHistory'),
+      meVxnRead(),
+      typeof labTab === 'function' ? labTab('fear_greedHistory').catch(() => []) : Promise.resolve([]),
+      typeof labTab === 'function' ? labTab('AAIIHistory').catch(() => []) : Promise.resolve([]),
+      typeof labTab === 'function' ? labTab('CboeHistory').catch(() => []) : Promise.resolve([]),
+      typeof labTab === 'function' ? labTab('CboeHistory_2').catch(() => []) : Promise.resolve([]),
+      typeof labTab === 'function' ? labTab('VXNHistory').catch(() => []) : Promise.resolve([])
+    ]);
 
-    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-    console.log('[AURUM ME] Raw response:', text);
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      const p = JSON.parse(match[0]);
-      const num = v => (v === null || v === undefined || v === '' || isNaN(+v)) ? null : +v;
-      let fgi = num(p.fgi); if (fgi !== null && (fgi < 0 || fgi > 100)) fgi = null;
-      meData.fgi = fgi;
-      let vix = num(p.vix); if (vix !== null && (vix < 5 || vix > 100)) vix = null;
-      meData.vix = vix; meData.vixInfo = { chgPct: num(p.vixChangePct), hi: num(p.vixHigh52), lo: num(p.vixLow52), asOf: p.vixAsOf || null };
-      meData.spx200 = spx200; meData.ndx200 = ndx200; meData.spxPct = spx200 ? spx200.pct : (p.ma200pct ?? null); meData.ma200pct = ndx200 ? ndx200.pct : null;
-      let vxn = num(p.vxn); if (vxn !== null && (vxn < 5 || vxn > 120)) vxn = null;
-      const sv = await meVxnRead(); if (sv !== null) { vxn = sv.v; meData.vxnSheet = sv; } else meData.vxnSheet = false;
-      meData.vxn = vxn; meData.vxnInfo = { chgPct: num(p.vxnChangePct), hi: num(p.vxnHigh52), lo: num(p.vxnLow52), asOf: p.vxnAsOf || null };
-      if (sv && sv.hi !== null) { meData.vxnInfo.hi = sv.hi; meData.vxnInfo.lo = sv.lo; }
-      if (sv && sv.chg !== null) meData.vxnInfo.chgPct = sv.chg;
-      const ab = num(p.aaiiBull), an = num(p.aaiiNeutral), ar = num(p.aaiiBear);
-      let aaii = null;
-      if (ab !== null && an !== null && ar !== null && Math.abs(ab + an + ar - 100) <= 1.5) aaii = { bull:ab, neu:an, bear:ar, avgBull:num(p.aaiiAvgBull), avgNeu:num(p.aaiiAvgNeutral), avgBear:num(p.aaiiAvgBear), spread:+(ab - ar).toFixed(1), week:p.aaiiWeekEnding || null };
-      meData.aaii = aaii; meData.aaiiSpread = aaii ? aaii.spread : null;
-      meData.src = { fgi: got('cnn.com'), vix: got('tradable-products/vix'), aaii: got('aaii.com'), pcr: cboeRead, vxn: got('vxn') || !!meData.vxnSheet };
-      let srcNote = (meData.src.fgi ? '' : ' · ⚠ F&G unverified (CNN page not readable)') + (meData.src.vxn ? '' : ' · ⚠ VXN unverified (Cboe VXN page not readable — use manual override)') + (meData.src.aaii ? '' : ' · ⚠ AAII unverified') + (spx200 ? (spx200.stale ? ' · ⚠ S&P sheet data stale (' + spx200.date + ')' : '') : ' · ⚠ SPX vs 200DMA unverified (SP500History tab unreadable)');
-      srcNote += ndx200 ? (ndx200.stale ? ' · ⚠ NDX sheet data stale (' + ndx200.date + ')' : '') : ' · ⚠ NDX vs 200-DMA unavailable (PriceHistory tab unreadable)';
-      if (aaii && aaii.week) { const ag = (Date.now() - new Date(aaii.week)) / 864e5; if (ag > 10) srcNote += ' ⚠ AAII STALE'; }
-      // Put/Call validation: recompute from raw volumes, reject implausible values, check date freshness
-      let pcr = (p.pcr === null || p.pcr === undefined) ? null : +p.pcr;
-      const pcl = +p.pcrCalls, ppu = +p.pcrPuts;
-      if (pcl > 0 && ppu > 0) { const calc = ppu / pcl; if (pcr === null || isNaN(pcr) || Math.abs(calc - pcr) > 0.03) pcr = +calc.toFixed(2); }
-      if (pcr !== null && (isNaN(pcr) || pcr < 0.2 || pcr > 2)) pcr = null;
-      meData.pcr = pcr; meData.pcrDate = p.pcrDate || null;
-      let pcrNote = pcr === null ? ' · Put/Call: not found' : cboeRead ? ' · Put/Call: Cboe daily stats' + (p.pcrDate ? ' (' + p.pcrDate + ')' : ' (date not shown)') : ' · ⚠ Put/Call: Cboe page unreadable, web-search value (unverified)';
-      if (p.pcrDate) { const age = (Date.now() - new Date(p.pcrDate)) / 864e5; if (age > 4) pcrNote += ' ⚠ STALE'; }
-      document.getElementById('me-fetched-at').textContent = 'Fetched ' + new Date().toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) + pcrNote + srcNote;
+    meData.spx200 = spx200;
+    meData.ndx200 = ndx200;
+    meData.spxPct = spx200 ? spx200.pct : null;
+    meData.ma200pct = ndx200 ? ndx200.pct : null;
+
+    // VXN: prefer PE_Data!N1:R1 (meVxnRead), fallback to latest VXNHistory row
+    let vxn = null;
+    let vxnFromSheet = false;
+    if (sv !== null) {
+      vxn = sv.v;
+      vxnFromSheet = true;
+      meData.vxnSheet = sv;
+      meData.vxnInfo = Object.assign(
+        meData.vxnInfo || {},
+        sv.hi !== null ? { hi: sv.hi, lo: sv.lo } : {},
+        sv.chg !== null ? { chgPct: sv.chg } : {}
+      );
     } else {
-      document.getElementById('me-fetched-at').textContent = 'No JSON found in response — open DevTools console to see raw text';
+      meData.vxnSheet = false;
+      const vnSer = typeof labSer === 'function' ? labSer(vnR || [], 0, 4).filter(x => x.v > 5 && x.v < 120) : [];
+      if (vnSer.length) {
+        const lastVn = vnSer[vnSer.length - 1];
+        vxn = lastVn.v;
+        vxnFromSheet = true;
+        meData.vxnInfo = Object.assign(meData.vxnInfo || {}, { asOf: lastVn.k });
+      }
     }
-  } catch(e) {
+    meData.vxn = vxn;
+
+    // Fear & Greed from fear_greedHistory
+    const fgSer = typeof labSer === 'function' ? labSer(fgR || [], 0, 1).filter(x => x.v >= 0 && x.v <= 100) : [];
+    const lastFg = fgSer.length ? fgSer[fgSer.length - 1] : null;
+    meData.fgi = lastFg ? lastFg.v : null;
+
+    // AAII sentiment from AAIIHistory (col 0 = date, col 1 = bull, col 3 = bear)
+    let aaii = null;
+    if (Array.isArray(aaR) && aaR.length && typeof labD === 'function' && typeof labN === 'function') {
+      const parsedAa = [];
+      aaR.forEach(w => {
+        const k = labD(w[0]);
+        let bu = labN(w[1]);
+        let be = labN(w[3]);
+        if (k && bu !== null && be !== null) {
+          if (bu <= 1 && be <= 1) { bu *= 100; be *= 100; }
+          const ne = Math.max(0, +(100 - bu - be).toFixed(1));
+          parsedAa.push({ k, bull: +bu.toFixed(1), neu: ne, bear: +be.toFixed(1), spread: +(bu - be).toFixed(1) });
+        }
+      });
+      parsedAa.sort((a, b) => a.k < b.k ? -1 : 1);
+      if (parsedAa.length) {
+        const x = parsedAa[parsedAa.length - 1];
+        aaii = { bull: x.bull, neu: x.neu, bear: x.bear, avgBull: null, avgNeu: null, avgBear: null, spread: x.spread, week: x.k };
+      }
+    }
+    meData.aaii = aaii;
+    meData.aaiiSpread = aaii ? aaii.spread : null;
+
+    // Put/Call from CboeHistory_2 + CboeHistory
+    const pcMap = {};
+    if (typeof labSer === 'function') {
+      labSer(c2R || [], 0, 4).concat(labSer(c1R || [], 0, 1)).forEach(x => {
+        if (x.v > 0.1 && x.v < 4) pcMap[x.k] = x.v;
+      });
+    }
+    const pcKeys = Object.keys(pcMap).sort();
+    const lastPcKey = pcKeys.length ? pcKeys[pcKeys.length - 1] : null;
+    meData.pcr = lastPcKey ? pcMap[lastPcKey] : null;
+    meData.pcrDate = lastPcKey;
+
+    meData.src = {
+      fgi: !!lastFg,
+      vix: !!(meData.macro && meData.macro.cur),
+      aaii: !!aaii,
+      pcr: !!lastPcKey,
+      vxn: vxnFromSheet
+    };
+
+    meApplyOvr();
+
+    const notes = [];
+    if (!vxnFromSheet && meData.vxn == null) notes.push('⚠ VXN missing in sheet');
+    if (!lastFg && meData.fgi == null) notes.push('⚠ F&G missing in fear_greedHistory');
+    if (!aaii && meData.aaiiSpread == null) notes.push('⚠ AAII missing in AAIIHistory');
+    if (!lastPcKey && meData.pcr == null) notes.push('⚠ Put/Call missing in CboeHistory');
+    if (!spx200) notes.push('⚠ SP500History unreadable');
+    else if (spx200.stale) notes.push('⚠ SPX stale (' + spx200.date + ')');
+    if (!ndx200) notes.push('⚠ PriceHistory unreadable');
+    else if (ndx200.stale) notes.push('⚠ NDX stale (' + ndx200.date + ')');
+
+    document.getElementById('me-fetched-at').textContent =
+      'Fetched ' +
+      new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) +
+      ' · Source: Google Sheet' +
+      (notes.length ? ' · ' + notes.join(' · ') : '');
+  } catch (e) {
     console.error('[AURUM ME] Error:', e);
     document.getElementById('me-fetched-at').textContent = 'Error: ' + e.message;
   }
