@@ -8344,7 +8344,7 @@ function showPage(name, btn) {
   if (name === 'precision') { try{ mpActivate(); }catch(e){ console.error('[AURUM MP]',e); } pePopulate(); try{ peRibbonRender(); }catch(e){ console.error('[AURUM Ribbon]',e); } }
   if (name === 'td-sequential') { try { tdPoolRender(); } catch(e) {} try { tpRender(); } catch(e) {} }
   if (name === 'opex') opexActivate();
-  if (name === 'market-entry') { meSemisLoad(); meVxnLoad(); meMacroLoad(); meQqqLoad(); meLogRender(); meRemind(); meBookLoad(); meTltLoad(); meValLoad(); meFedLoad(); meRotLoad(); meCftcLoad(); mxLoad(); ctaLoad(); }
+  if (name === 'market-entry') { meSemisLoad(); meVxnLoad(); meMacroLoad(); meQqqLoad(); meLogRender(); meRemind(); meBookLoad(); meTltLoad(); meValLoad(); meFedLoad(); meRotLoad(); meCftcLoad(); mxLoad(); ctaLoad(); if (typeof fetchMarketEntry === 'function' && !window.__meAutoFetched) { window.__meAutoFetched = true; fetchMarketEntry(); } }
 }
 
 function toggleSidebar() {
